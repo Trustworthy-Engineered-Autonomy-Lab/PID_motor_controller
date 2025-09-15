@@ -90,7 +90,7 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_I2C_Slave_Receive_IT(&hi2c1, RX_Buffer, 1);
+  HAL_I2C_Slave_Receive_IT(&hi2c1, i2c_rx_buffer, 1);
 //  HAL_Delay(100);
   /* USER CODE END 2 */
 
@@ -101,6 +101,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+//	if(HAL_I2C_Slave_Receive(&hi2c1, i2c_rx_buffer, 1, 100) == HAL_OK)
+//	{
+//		HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
+//	}
+//	 HAL_I2C_Slave_Receive_IT(hi2c1, i2c_rx_buffer, 1);
   }
   /* USER CODE END 3 */
 }
@@ -159,11 +164,11 @@ static void MX_I2C1_Init(void)
   hi2c1.Instance = I2C1;
   hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 6;
+  hi2c1.Init.OwnAddress1 = 16;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
   hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_ENABLE;
   hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
   if (HAL_I2C_Init(&hi2c1) != HAL_OK)
   {
@@ -189,6 +194,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -207,10 +213,14 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_I2C_SlaveRxCpltCaWrllback(I2C_HandleTypeDef *h12c){
-	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_RESET);
-	HAL_Delay(200);
-	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_SET);
+void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
+//	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_RESET);
+////	HAL_Delay(200);
+//	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_SET);
+	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
+
+	 // Re-arm the I2C to receive the next byte
+	HAL_I2C_Slave_Receive_IT(&hi2c1, i2c_rx_buffer, 1);
 }
 
 /* USER CODE END 4 */
