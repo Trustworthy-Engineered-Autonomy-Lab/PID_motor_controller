@@ -31,12 +31,18 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define PWM_MAX_DUTY        50      // Maximum PWM compare value (adjust based on your timer config)
+#define MAX_PULSEWIDTH		2.0f	// 2ms = Max pulsewidth servo will handle
+#define TOTAL_PERIOD		50.0f	// 1 / 20 Hz = 50ms
+#define MAX_CCR				36000	// Max CCR = Auto Reload Register Value (the Maximum value our timer will count to)
+#define CCR_MAX_VALUE       (MAX_PULSEWIDTH/TOTAL_PERIOD)*MAX_CCR - 1 // 1440 is the corresponding 4% CCR value
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#define PULSE_WIDTH_TO_DUTYCYCLE(p) ((p)/50.0f)
+#define DUTYCYCLE_TO_CCR(d) ((d)*36000-1)
+#define PULSE_WIDTH_TO_CCR(p) DUTYCYCLE_TO_CCR(PULSE_WIDTH_TO_DUTYCYCLE(p))
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -45,7 +51,9 @@ I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-int16_t rpm_set;
+// make following variables volatile since they are altered within constantly by ISR
+volatile int16_t rpm_set;
+volatile uint8_t pwm_update_flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -54,7 +62,8 @@ static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-
+//uint32_t rpm_to_pwm_duty(int16_t rpm);
+void update_pwm_duty_cycle(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -96,7 +105,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 18000 - 1);
+//  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 18000-1);
+  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PULSE_WIDTH_TO_CCR(1.5));
 //  HAL_I2C_Slave_Transmit_IT(&hi2c1, /*(uint8_t*)*/&rpm_set, 2);
 //  HAL_Delay(100);
   /* USER CODE END 2 */
@@ -108,13 +118,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//	if(HAL_I2C_Slave_Receive(&hi2c1, rpm_set, 1, 100) == HAL_OK)
-//	{
-//		HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
-//	}
-//	 HAL_I2C_Slave_Receive_IT(hi2c1, rpm_set, 1);
-  }
+	// Check if new I2C data received and PWM needs updating
+	  if (pwm_update_flag == 1)
+		  update_pwm_duty_cycle(); // Shoutout Claude
   /* USER CODE END 3 */
+  }
 }
 
 /**
@@ -289,17 +297,88 @@ void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
 //	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_SET);
 	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
 
+	pwm_update_flag = 1;
+
 	// Re-arm the I2C to receive the next byte
 	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
 //	HAL_I2C_Slave_Transmit_IT(&hi2c1, &rpm_set, 2); /* I2C Transmitting only used for testing purposes */
 }
 
-/* I2C Transmitting only used for testing purposes */
-//void HAL_I2C_SlaveTxCpltCallback(I2C_HandleTypeDef *hi2c){
-//	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
-//	HAL_I2C_Slave_Receive_IT(&hi2c1, &rpm_set, 2);
-//	HAL_
+/**
+ * @brief Convert RPM setpoint to PWM duty cycle
+ * @param rpm: RPM value received from I2C (0 to RPM_MAX_VALUE)
+ * @retval PWM compare value (0 to PWM_MAX_VALUE)
+ *
+ * This function maps the RPM value to appropriate PWM duty cycle.
+ * You can modify this function to implement different control algorithms.
+ * ***Unneeded for now since we are taking in raw CCR values
+ */
+//uint32_t rpm_to_pwm_duty(int16_t rpm)
+//{
+//    uint32_t pwm_value;
+//
+//    // Ensure RPM is within valid range
+//    if (rpm < 0) {
+//        rpm = 0;
+//    } else if (rpm > RPM_MAX_VALUE) {
+//        rpm = RPM_MAX_VALUE;
+//    }
+//
+//    // Linear mapping: PWM = (RPM / RPM_MAX) * PWM_MAX
+//    pwm_value = ((uint32_t)rpm * PWM_MAX_DUTY) / RPM_MAX_VALUE;
+//
+//    // Ensure PWM value is within bounds
+//    if (pwm_value > PWM_MAX_DUTY) {
+//        pwm_value = PWM_MAX_DUTY;
+//    }
+//
+//    return pwm_value;
 //}
+
+
+
+/**
+ * @brief Update PWM duty cycle based on current RPM setpoint
+ * @retval None
+ *
+ * Call this function in your main loop when pwm_update_flag is set.
+ */
+void update_pwm_duty_cycle(void)
+{
+    /* Code below not used since we're taking in raw CCR values for now
+    uint32_t new_pwm_value;
+
+    // Convert RPM to PWM duty cycle
+	new_pwm_value = rpm_to_pwm_duty(rpm_set);
+
+	// Update PWM compare value (this changes the duty cycle)
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, new_pwm_value);
+
+    // used for later development, for now we will directly read CCR from I2C
+    // Convert RPM to PWM duty cycle
+//    new_pwm_value = rpm_to_pwm_duty(rpm_set);
+
+     */
+
+	uint32_t new_ccr_value;
+    // Ensure CCR is within valid range
+	if (rpm_set < 0) {
+		new_ccr_value = 0;
+	} else if (rpm_set > CCR_MAX_VALUE) {
+		new_ccr_value = CCR_MAX_VALUE;
+	} else {
+		new_ccr_value = rpm_set;
+	}
+
+    // Update PWM compare value (this changes the duty cycle)
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, new_ccr_value);
+
+    // Clear the update flag
+    pwm_update_flag = 0;
+
+    // Optional: Add debugging output (remove in production)
+    // printf("RPM: %d, PWM: %lu\r\n", rpm_set, new_pwm_value);
+}
 
 /* USER CODE END 4 */
 
