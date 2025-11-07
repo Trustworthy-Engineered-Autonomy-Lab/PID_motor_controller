@@ -49,11 +49,14 @@
 I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 // make following variables volatile since they are altered within constantly by ISR
 volatile int16_t rpm_set;
 volatile uint8_t pwm_update_flag = 0;
+volatile float motor_rpm = 0;
+volatile uint32_t hall_capture_value = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,6 +64,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 //uint32_t rpm_to_pwm_duty(int16_t rpm);
 void update_pwm_duty_cycle(void);
@@ -102,6 +106,7 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -109,6 +114,7 @@ int main(void)
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PULSE_WIDTH_TO_CCR(1.5));
 //  HAL_I2C_Slave_Transmit_IT(&hi2c1, /*(uint8_t*)*/&rpm_set, 2);
 //  HAL_Delay(100);
+  HAL_TIMEx_HallSensor_Start_IT(&htim3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -121,8 +127,8 @@ int main(void)
 	// Check if new I2C data received and PWM needs updating
 	  if (pwm_update_flag == 1)
 		  update_pwm_duty_cycle(); // Shoutout Claude
-  /* USER CODE END 3 */
   }
+  /* USER CODE END 3 */
 }
 
 /**
@@ -258,6 +264,50 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_HallSensor_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 99;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.Commutation_Delay = 0;
+  if (HAL_TIMEx_HallSensor_Init(&htim3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_OC2REF;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -302,6 +352,28 @@ void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
 	// Re-arm the I2C to receive the next byte
 	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
 //	HAL_I2C_Slave_Transmit_IT(&hi2c1, &rpm_set, 2); /* I2C Transmitting only used for testing purposes */
+}
+
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM3) { // Must make sure we're only processing TIM3's events
+        // Hall sensor capture event
+//        hall_capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1); // Reads from capture channel 1, same as line below
+        hall_capture_value = htim->Instance->CCR1; // Compare/Capture Register 1 store # of ticks between transitions
+
+        // TODO: divide by 2.0f bc RPM too high?? TBD (MAX rpm = ~38k, should be ~20k
+        if (hall_capture_value > 0) {
+        	// 1. Convert time between hall sensor edge transitions from # of ticks
+        	// Freq = 720kHz | 1/Freq = time per clock tick = 1.39us | # of ticks between edges * seconds/tick = # of seconds between edges
+            float time_between_edges = hall_capture_value / 720000.0f;
+            // 2. Store frequency of hall sensor edge transitions as # of ticks per transition
+            float frequency = 1.0f / time_between_edges;
+            // 3. Convert to Rotations per Minute
+            // 6 transitions per 1 full rotation | 60 seconds in a minute
+            // # of ticks per transition * 60 seconds / minute / (6 transitions/rotation) = Rotation per Minute
+            motor_rpm = (frequency * 60.0f) / 6.0f;
+        }
+    }
 }
 
 /**
