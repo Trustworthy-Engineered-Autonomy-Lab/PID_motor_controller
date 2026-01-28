@@ -48,12 +48,33 @@
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 // make following variables volatile since they are altered within constantly by ISR
 volatile int16_t rpm_set;
 volatile uint8_t pwm_update_flag = 0;
+volatile uint8_t pid_update_flag = 0;
+volatile float motor_rpm = 0;
+volatile uint32_t hall_capture_value = 0;
+
+// PID coeffs
+//float Kp = 0.1f;
+//float Ki = 0.01f;
+//float Kd = 0.05f;
+float Kp = 0.1f;
+float Ki = 0.0f;
+float Kd = 0.0f;
+
+// PID state variables
+float error_integral = 0.0f; // global value since it needs to accumulate over time
+float error_previous = 0.0f;
+
+// PID timing value
+const float dt = 0.015f; // dt = 15ms
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,9 +82,12 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 //uint32_t rpm_to_pwm_duty(int16_t rpm);
-void update_pwm_duty_cycle(void);
+void update_non_pid(void);
+void update_pid(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -101,7 +125,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
-  MX_TIM2_Init();
+  MX_TIM2_Init(); // outputs a PWM signal from an input compare and capture value
+  MX_TIM3_Init(); // configured in Hall Sensor Trigger mode to calculate RPM
+  MX_TIM1_Init(); // used for PID updates via a timer interrupt
   /* USER CODE BEGIN 2 */
   HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -109,6 +135,8 @@ int main(void)
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PULSE_WIDTH_TO_CCR(1.5));
 //  HAL_I2C_Slave_Transmit_IT(&hi2c1, /*(uint8_t*)*/&rpm_set, 2);
 //  HAL_Delay(100);
+  HAL_TIMEx_HallSensor_Start_IT(&htim3);
+  HAL_TIM_Base_Start_IT(&htim1); // start timer 1
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -118,11 +146,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+//	  update_non_pid();
 	// Check if new I2C data received and PWM needs updating
-	  if (pwm_update_flag == 1)
-		  update_pwm_duty_cycle(); // Shoutout Claude
-  /* USER CODE END 3 */
+	  if (pid_update_flag == 1){ // pid updated every 10ms via TIM1
+		  pid_update_flag = 0;
+		  update_pid();
+	  }
   }
+  /* USER CODE END 3 */
 }
 
 /**
@@ -199,6 +230,52 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 99;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 10799;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
   * @brief TIM2 Initialization Function
   * @param None
   * @retval None
@@ -258,6 +335,50 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_HallSensor_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 99;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.Commutation_Delay = 0;
+  if (HAL_TIMEx_HallSensor_Init(&htim3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_OC2REF;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -291,17 +412,55 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM1) {
+        pid_update_flag = 1;  // Signal main loop to run PID
+    }
+}
+
 void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
 //	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_RESET);
 ////	HAL_Delay(200);
 //	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_SET);
 	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
 
-	pwm_update_flag = 1;
+//	pwm_update_flag = 1; // not needed anymore, setpoint update in callback function (i.e. interrupt)
 
 	// Re-arm the I2C to receive the next byte
 	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
 //	HAL_I2C_Slave_Transmit_IT(&hi2c1, &rpm_set, 2); /* I2C Transmitting only used for testing purposes */
+}
+
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+    /* FIXME: May be an issue that this only updates when TIM3 is triggered by the
+     * motor spinning?? i.e. when the wheel stops does the controller incorrectly
+     * output an rpm that's *not* 0?
+     */
+	/*
+	 * FIXME: Potential fix: use HAL_GetTick() to see how long it has been since last trigger.
+	 * If it's been more than X ms then set motor_rpm = 0
+	 */
+	if (htim->Instance == TIM3) { // Must make sure we're only processing TIM3's events
+        // Hall sensor capture event
+//        hall_capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1); // Reads from capture channel 1, same as line below
+        hall_capture_value = htim->Instance->CCR1; // Compare/Capture Register 1 store # of ticks between transitions
+
+        // FIXME: divide by 2.0f bc RPM too high?? TBD (MAX rpm = ~38k, should be ~20k
+        if (hall_capture_value > 0) {
+        	// 1. Convert time between hall sensor edge transitions from # of ticks
+        	// Freq = 720kHz | 1/Freq = time per clock tick = 1.39us | # of ticks between edges * seconds/tick = # of seconds between edges
+            float time_between_edges = hall_capture_value / 720000.0f;
+            // 2. Store frequency of hall sensor edge transitions as # of ticks per transition
+            float frequency = 1.0f / time_between_edges;
+            // 3. Convert to Rotations per Minute
+            // 6 transitions per 1 full rotation | 60 seconds in a minute
+            // # of ticks per transition * 60 seconds / minute / (6 transitions/rotation) = Rotation per Minute
+            motor_rpm = (frequency * 60.0f) / 6.0f;
+        }
+    }
 }
 
 /**
@@ -341,9 +500,9 @@ void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
  * @brief Update PWM duty cycle based on current RPM setpoint
  * @retval None
  *
- * Call this function in your main loop when pwm_update_flag is set.
+ * Call this function in main loop when pwm_update_flag is set.
  */
-void update_pwm_duty_cycle(void)
+void update_non_pid(void) // non_pid algo
 {
     /* Code below not used since we're taking in raw CCR values for now
     uint32_t new_pwm_value;
@@ -379,6 +538,65 @@ void update_pwm_duty_cycle(void)
     // Optional: Add debugging output (remove in production)
     // printf("RPM: %d, PWM: %lu\r\n", rpm_set, new_pwm_value);
 }
+
+
+void update_pid(void) {
+
+	/*
+	 * motor_rpm set in TIM3 Hall Sensor Trigger interrupt
+	 * rpm_set set within I2C receive callback function
+	 * Calculate error from these two values
+	 * Use error to find P, I, & D
+	 * Calculate set point via the tuned PID weights
+	 * Use this set point in update_pwm to output signal to motor driver
+	 */
+	float error = (float)(rpm_set) - motor_rpm;
+
+	float P_term = Kp * error;
+
+	error_integral += error*dt; // dt defined as 0.015f for 15ms
+
+	// Anti-windup for integral path
+	float integral_max = 500.0f; // TODO: tune max integral value
+	if(error_integral > integral_max) {
+		error_integral = integral_max;
+	} else if (error_integral < (-1)*(integral_max)) {
+		error_integral = (-1)*(integral_max);
+	}
+
+	float I_term = Ki*error_integral;
+
+	//  rate of change of error
+	float error_derivative = (error - error_previous) / dt;
+	float D_term = Kd*error_derivative;
+
+	// combine PID terms
+	float pid_output = P_term + I_term + D_term;
+
+	// Converting PID output to Compare & Capture value for PWM
+	// FIXME: relationship between pid_output unknown
+	// FOR NOW: will just add float value to base CCR
+
+	float base_ccr = PULSE_WIDTH_TO_CCR(1.5);
+	float new_ccr = base_ccr + pid_output;
+
+	// 7. Clamp CCR
+	uint32_t ccr_output;
+	if(new_ccr < 0) {
+		ccr_output = 0;
+	} else if (new_ccr > CCR_MAX_VALUE) {
+		ccr_output = CCR_MAX_VALUE;
+	} else {
+		ccr_output = (uint32_t)new_ccr;
+	}
+
+	// Update PWM
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr_output);
+
+	// Store current error for next PID update
+	error_previous = error;
+}
+
 
 /* USER CODE END 4 */
 
