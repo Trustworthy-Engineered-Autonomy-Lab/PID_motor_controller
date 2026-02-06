@@ -577,7 +577,7 @@ void update_pid(void) {
 	// FIXME: relationship between pid_output unknown
 	// FOR NOW: will just add float value to base CCR
 
-	float base_ccr = PULSE_WIDTH_TO_CCR(1.5);
+	const float base_ccr = PULSE_WIDTH_TO_CCR(1.5);
 	float new_ccr = base_ccr + pid_output;
 
 	// 7. Clamp CCR
