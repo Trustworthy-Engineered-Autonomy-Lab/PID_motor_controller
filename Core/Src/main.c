@@ -65,7 +65,7 @@ volatile uint32_t hall_capture_value = 0;
 //float Ki = 0.01f;
 //float Kd = 0.05f;
 float Kp = 0.1f;
-float Ki = 0.0f;
+float Ki = 0.01f;
 float Kd = 0.0f;
 
 // PID state variables
