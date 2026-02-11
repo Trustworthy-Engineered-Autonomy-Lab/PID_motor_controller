@@ -63,7 +63,7 @@ void User_Init(void){ // Initialization function
 			);
 }
 
-void loop(void){ // Main Loop
+void user_loop(void){ // Main Loop
 
 	//	  openloop_pwm_update();
 	// Check if new I2C data received and PWM needs updating
@@ -71,6 +71,8 @@ void loop(void){ // Main Loop
 		pid_update_flag = 0;
 		pid_pwm_update();
 	}
+
+//	openloop_pwm_update(); // Run open loop controller from user.c
 }
 
 

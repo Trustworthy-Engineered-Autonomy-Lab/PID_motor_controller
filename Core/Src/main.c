@@ -111,7 +111,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-	  loop(); // Run main loop from user.c
+	  user_loop(); // Run main loop from user.c
     /* USER CODE BEGIN 3 */
 
   }
