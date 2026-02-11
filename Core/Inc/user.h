@@ -35,7 +35,7 @@
 
 #define PWM_PULSEWIDTH_TO_DUTYCYCLE(p) ((p)/PWM_FREQUENCY)
 #define PWM_DUTYCYCLE_TO_CCR(d) ((d) * PWM_TIM_ARR - 1)
-#define PWM_PULSEWIDTH_TO_CCR(p) DUTYCYCLE_TO_CCR(PULSEWIDTH_TO_DUTYCYCLE(p))
+#define PWM_PULSEWIDTH_TO_CCR(p) PWM_DUTYCYCLE_TO_CCR(PWM_PULSEWIDTH_TO_DUTYCYCLE(p))
 
 /* End Macros */
 
@@ -43,7 +43,7 @@
 
 /* Function Declarations */
 void User_Init(void);
-void loop(void);
+void User_Loop(void);
 
 
 /* End Function Declarations */

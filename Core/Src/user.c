@@ -66,7 +66,7 @@ void User_Init(void){ // Initialization function
 			);
 }
 
-void loop(void){ // Main Loop
+void User_Loop(void){ // Main Loop
 
 
 	// Check if new I2C data received and PWM needs updating
@@ -106,8 +106,8 @@ void openloop_pwm_update(void) // non_pid algo
     // Ensure CCR is within valid range
 	if (rpm_set < 0) {
 		new_ccr_value = 0;
-	} else if (rpm_set > CCR_MAX_VALUE) {
-		new_ccr_value = CCR_MAX_VALUE;
+	} else if (rpm_set > PWM_CCR_MAX) {
+		new_ccr_value = PWM_CCR_MAX;
 	} else {
 		new_ccr_value = rpm_set;
 	}
@@ -136,14 +136,14 @@ void pid_pwm_update(void) {
 
 
 	// Computes pulse_width value and then converts to a new CCR value
-	float pulse_width = ZERO_PULSEWIDTH + motor_pid.output;
+	float pulse_width = PWM_ZERO_PULSEWIDTH + motor_pid.output;
 	uint32_t ccr_output = (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_width);
 
 	// FIXME: Clamp CCR output. Might not be necessary since PID output is already clamped
-	if(ccr_output < PWM_CCR_MIN_VALUE) {
-		ccr_output = PWM_CCR_MIN_VALUE;
-	} else if (ccr_output > PWM_CCR_MAX_VALUE) {
-		ccr_output = PWM_CCR_MAX_VALUE;
+	if(ccr_output < PWM_CCR_MIN) {
+		ccr_output = PWM_CCR_MIN;
+	} else if (ccr_output > PWM_CCR_MAX) {
+		ccr_output = PWM_CCR_MAX;
 	}
 
 	// Update PWM
