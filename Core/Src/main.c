@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "user.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -98,10 +97,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
-  MX_TIM2_Init(); // outputs a PWM signal from an input compare and capture value
-  MX_TIM3_Init(); // configured in Hall Sensor Trigger mode to calculate RPM
-  MX_TIM1_Init(); // used for PID updates via a timer interrupt
-
+  MX_TIM2_Init();
+  MX_TIM3_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   User_Init();
   /* USER CODE END 2 */
@@ -111,9 +109,9 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-	  loop(); // Run main loop from user.c
-    /* USER CODE BEGIN 3 */
 
+    /* USER CODE BEGIN 3 */
+	  loop();
   }
   /* USER CODE END 3 */
 }
@@ -259,7 +257,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 99;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 35999;
+  htim2.Init.Period = 14399;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)

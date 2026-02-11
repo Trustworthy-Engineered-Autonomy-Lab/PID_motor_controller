@@ -29,6 +29,8 @@ const float Kp = 0.1; // Proportional Coefficient
 const float Ki = 0; // Integral Coefficient
 const float Kd = 0; // Derivative Coefficient
 const float Integral_max = 500.0f; // Anti-windup value
+const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH; // 1.5ms +- .5ms
+
 
 /* End Variable Definitions */
 
@@ -38,6 +40,7 @@ const float Integral_max = 500.0f; // Anti-windup value
 void openloop_pwm_update(void);
 void pid_pwm_update(void);
 
+
 /* End Function Declarations */
 
 /* Function Definitions */
@@ -46,10 +49,9 @@ void User_Init(void){ // Initialization function
 
 	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-	//  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 18000-1);
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PULSE_WIDTH_TO_CCR(1.5));
-	//  HAL_I2C_Slave_Transmit_IT(&hi2c1, /*(uint8_t*)*/&rpm_set, 2);
-	//  HAL_Delay(100);
+
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CCR_DEFAULT); // Default pulse width = 1.5ms
+
 	HAL_TIMEx_HallSensor_Start_IT(&htim3);
 	HAL_TIM_Base_Start_IT(&htim1); // start timer 1
 
@@ -59,18 +61,20 @@ void User_Init(void){ // Initialization function
 			Kp,
 			Ki,
 			Kd,
-			Integral_max
+			Integral_max,
+			pid_max
 			);
 }
 
 void loop(void){ // Main Loop
 
-	//	  openloop_pwm_update();
+
 	// Check if new I2C data received and PWM needs updating
 	if (pid_update_flag == 1){ // pid updated every 10ms via TIM1
 		pid_update_flag = 0;
 		pid_pwm_update();
 	}
+	// Note: Starts ESC at 1.5 ms pulse width, then stay between 1ms and 2ms
 }
 
 
@@ -127,24 +131,19 @@ void pid_pwm_update(void) {
 	 * Use this set point in update_pwm to output signal to motor driver
 	 */
 
-	float pid_output = PID_Compute(&motor_pid, (float)rpm_set, motor_rpm, dt);
+	// Compute PID output
+	PID_Compute(&motor_pid, (float)rpm_set, motor_rpm, dt);
 
 
-	// Converting PID output to Compare & Capture value for PWM
-	// FIXME: relationship between pid_output unknown
-	// FOR NOW: will just add float value to base CCR
+	// Computes pulse_width value and then converts to a new CCR value
+	float pulse_width = ZERO_PULSEWIDTH + motor_pid.output;
+	uint32_t ccr_output = (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_width);
 
-	float base_ccr = PULSE_WIDTH_TO_CCR(1.5);
-	float new_ccr = base_ccr + pid_output;
-
-	// 7. Clamp CCR
-	uint32_t ccr_output;
-	if(new_ccr < 0) {
-		ccr_output = 0;
-	} else if (new_ccr > CCR_MAX_VALUE) {
-		ccr_output = CCR_MAX_VALUE;
-	} else {
-		ccr_output = (uint32_t)new_ccr;
+	// FIXME: Clamp CCR output. Might not be necessary since PID output is already clamped
+	if(ccr_output < PWM_CCR_MIN_VALUE) {
+		ccr_output = PWM_CCR_MIN_VALUE;
+	} else if (ccr_output > PWM_CCR_MAX_VALUE) {
+		ccr_output = PWM_CCR_MAX_VALUE;
 	}
 
 	// Update PWM

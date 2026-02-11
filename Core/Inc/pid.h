@@ -14,10 +14,13 @@ typedef struct{
 	float ki;
 	float kd;
 
+	float integral_max;
+	float pid_max;
+
 	float error_integral;
 	float error_previous;
 
-	float integral_max;
+	float output;
 
 } PID_t;
 
@@ -26,13 +29,14 @@ void PID_Init(PID_t *pid,
         	float kp,
 			float ki,
 			float kd,
-			float integral_max);
+			float integral_max,
+			float pid_max);
 
 // Resets integral and derivative memory
 void PID_Reset(PID_t *pid);
 
 // Computes PID output
-float PID_Compute(PID_t *pid,
+void PID_Compute(PID_t *pid,
                   float setpoint, // Desired value
                   float measurement, // Current value
                   float dt); // time step in seconds
