@@ -16,15 +16,26 @@
 /* End Includes */
 
 /* Macros */
-#define PWM_MAX_DUTY        50      // Maximum PWM compare value (adjust based on your timer config)
-#define MAX_PULSEWIDTH		2.0f	// 2ms = Max pulsewidth servo will handle
-#define TOTAL_PERIOD		50.0f	// 1 / 20 Hz = 50ms
-#define MAX_CCR				36000	// Max CCR = Auto Reload Register Value (the Maximum value our timer will count to)
-#define CCR_MAX_VALUE       (MAX_PULSEWIDTH/TOTAL_PERIOD)*MAX_CCR - 1 // 1440 is the corresponding 4% CCR value
 
-#define PULSE_WIDTH_TO_DUTYCYCLE(p) ((p)/50.0f)
-#define DUTYCYCLE_TO_CCR(d) ((d)*36000-1)
-#define PULSE_WIDTH_TO_CCR(p) DUTYCYCLE_TO_CCR(PULSE_WIDTH_TO_DUTYCYCLE(p))
+/* Typical RC ESC's (like the one we are currently using) control the motor based off of the pulse
+ * width in the received PWM signal, with the default/zero value being 1.5ms, and a standard range
+ * of 1-2ms
+ */
+#define PWM_MIN_PULSEWIDTH		1.0f
+#define PWM_ZERO_PULSEWIDTH		1.5f
+#define PWM_MAX_PULSEWIDTH		2.0f
+
+#define PWM_FREQUENCY		50.0f	// Frequency of PWM output timer, TIM2
+#define PWM_TIM_ARR			14400	// Auto Reload Register Value (the Maximum value our timer will count to)
+
+#define PWM_CCR_MIN			(PWM_MIN_PULSEWIDTH * PWM_FREQUENCY) * PWM_TIM_ARR - 1
+#define PWM_CCR_DEFAULT		(PWM_ZERO_PULSEWIDTH * PWM_FREQUENCY) * PWM_TIM_ARR - 1
+#define PWM_CCR_MAX      	(PWM_MAX_PULSEWIDTH * PWM_FREQUENCY) * PWM_TIM_ARR - 1
+
+
+#define PWM_PULSEWIDTH_TO_DUTYCYCLE(p) ((p)/PWM_FREQUENCY)
+#define PWM_DUTYCYCLE_TO_CCR(d) ((d) * PWM_TIM_ARR - 1)
+#define PWM_PULSEWIDTH_TO_CCR(p) PWM_DUTYCYCLE_TO_CCR(PWM_PULSEWIDTH_TO_DUTYCYCLE(p))
 
 /* End Macros */
 
@@ -32,7 +43,7 @@
 
 /* Function Declarations */
 void User_Init(void);
-void user_loop(void);
+void User_Loop(void);
 
 
 /* End Function Declarations */

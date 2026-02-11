@@ -12,7 +12,8 @@ void PID_Init(PID_t *pid,
               float kp,
               float ki,
               float kd,
-			  float integral_max)
+			  float integral_max,
+			  float pid_max)
 {
     pid->kp = kp;
     pid->ki = ki;
@@ -22,6 +23,7 @@ void PID_Init(PID_t *pid,
     pid->error_previous = 0.0f;
 
     pid->integral_max = integral_max;
+    pid->pid_max = pid_max;
 }
 
 
@@ -34,7 +36,7 @@ void PID_Reset(PID_t *pid)
 
 
 // Computes PID output
-float PID_Compute(PID_t *pid,
+void PID_Compute(PID_t *pid,
                   float setpoint,
                   float measurement,
                   float dt)
@@ -61,10 +63,17 @@ float PID_Compute(PID_t *pid,
     float derivative = (error - pid->error_previous) / dt;
     float d = pid->kd * derivative;
 
-    float output = p + i + d;
+    pid->output = p + i + d;
+
+    if(pid->output >= pid->pid_max){
+    	pid->output = pid->pid_max;
+    }
+    if(pid->output <= (-1)*pid->pid_max)
+    {
+    	pid->output = (-1)*pid->pid_max;
+    }
 
 
     pid->error_previous = error;
 
-    return output;
 }
