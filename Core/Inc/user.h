@@ -32,7 +32,7 @@
 
 /* Function Declarations */
 void User_Init(void);
-void loop(void);
+void user_loop(void);
 
 
 /* End Function Declarations */
