@@ -15,19 +15,26 @@ extern TIM_HandleTypeDef htim3;
 
 
 // make following variables volatile since they are altered within constantly by ISR
-volatile int16_t rpm_set;
+// FIXME: (Low) Eventual change to fixed point arithmetic (or purchase chip with FPU)
+// FIXME: (High) speed_setpoint should def be float when real speed values are used, kept as int16_t until
+// speed to rpm conversion figured out
+volatile int16_t speed_setpoint = 0;
 volatile uint8_t pwm_update_flag = 0;
 volatile uint8_t pid_update_flag = 0;
+volatile uint8_t speed_update_flag = 0;
+// FIXME: (High) motor_rpm hould probably be int16_t since magnitude on order of hundreds
 volatile float motor_rpm = 0;
 volatile uint32_t hall_capture_value = 0;
 
 PID_t motor_pid; // Instantiate motor PID controller
 
 // PID values
+// FIXME: (High) Start tuning controller
 const float dt = 0.015f; // PID update rate
-const float Kp = 0.1; // Proportional Coefficient
+const float Kp = 0.0005; // Proportional Coefficient
 const float Ki = 0; // Integral Coefficient
 const float Kd = 0; // Derivative Coefficient
+// FIXME: (Medium) Calibrate better integral clamp
 const float Integral_max = 500.0f; // Anti-windup value
 const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH; // 1.5ms +- .5ms
 
@@ -35,10 +42,11 @@ const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH; // 1.5ms +- .5ms
 /* End Variable Definitions */
 
 /* Function Declarations */
-
-//uint32_t rpm_to_pwm_duty(int16_t rpm);
-void openloop_pwm_update(void);
-void pid_pwm_update(void);
+// FIXME: (Medium) Update rpm/speed_setpoint types later
+float rpm_update(int16_t speed_setpoint);
+void openloop_pwm_update(float rpm_setpoint);
+void pid_pwm_update(float rpm_setpoint);
+uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint);
 
 
 /* End Function Declarations */
@@ -47,7 +55,8 @@ void pid_pwm_update(void);
 
 void User_Init(void){ // Initialization function
 
-	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
+	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&speed_setpoint, 2); // FIXME: Why is this here?
+
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
 
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CCR_DEFAULT); // Default pulse width = 1.5ms
@@ -67,16 +76,31 @@ void User_Init(void){ // Initialization function
 }
 
 void User_Loop(void){ // Main Loop
+	// FIXME: (Medium) rpm_setpoint should probably be uint16_t
+	static float rpm_setpoint; // Static to stay the same until new i2c command
+
+	// Check if new speed target has been received
+	if (speed_update_flag == 1){
+		speed_update_flag = 0;
+		rpm_setpoint = rpm_update(speed_setpoint);
+	}
 
 
 	// Check if new I2C data received and PWM needs updating
 	if (pid_update_flag == 1){ // pid updated every 10ms via TIM1
 		pid_update_flag = 0;
-		pid_pwm_update();
+		pid_pwm_update(rpm_setpoint);
 	}
-	// Note: Starts ESC at 1.5 ms pulse width, then stay between 1ms and 2ms
+	// Note: Starts ESC at 1.5ms pulse width, then stay between 1ms and 2ms
 }
 
+
+// Converts speed command to RPM for PID controller
+float rpm_update(int16_t speed_setpoint){
+	// FIXME: (Low) Calibrate conversion once car can be set up
+	// For now, directly equate values (i2c will need to receive rpm instead of speed)
+	return (float)speed_setpoint;
+}
 
 
 /**
@@ -85,63 +109,78 @@ void User_Loop(void){ // Main Loop
  *
  * Call this function in main loop when pwm_update_flag is set.
  */
-void openloop_pwm_update(void) // non_pid algo
+
+/* FIXME: (Low) Update function to receive pulse width or PWM or something.
+ * Would require larger structural changes (i.e. not using i2c) to basically pass
+ * pulse width directly from Jetson Nano to ESC. Kept as is for now for debugging
+ * and prototyping purposes.
+ */
+void openloop_pwm_update(float rpm_setpoint) // non_pid algo
 {
-    /* Code below not used since we're taking in raw CCR values for now
+	/* FIXME: (High) Even for debugging purposes, basic open loop rpm to pulse width conversion
+	needed so we can start sending speed values over Jetson instead of changing what we send
+	based off of if we use the open loop or closed loop functions.
+
+    Code below not used since we're taking in raw CCR values for now
     uint32_t new_pwm_value;
 
     // Convert RPM to PWM duty cycle
-	new_pwm_value = rpm_to_pwm_duty(rpm_set);
+	new_pwm_value = rpm_to_pwm_duty(rpm_setpoint);
 
 	// Update PWM compare value (this changes the duty cycle)
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, new_pwm_value);
 
     // used for later development, for now we will directly read CCR from I2C
     // Convert RPM to PWM duty cycle
-//    new_pwm_value = rpm_to_pwm_duty(rpm_set);
+//    new_pwm_value = rpm_to_pwm_duty(rpm_setpoint);
 
      */
 
+
+
 	uint32_t new_ccr_value;
     // Ensure CCR is within valid range
-	if (rpm_set < 0) {
-		new_ccr_value = 0;
-	} else if (rpm_set > PWM_CCR_MAX) {
+	if (rpm_setpoint < PWM_CCR_MIN) {
+		new_ccr_value = PWM_CCR_MIN;
+	} else if (rpm_setpoint > PWM_CCR_MAX) {
 		new_ccr_value = PWM_CCR_MAX;
 	} else {
-		new_ccr_value = rpm_set;
+		new_ccr_value = (uint32_t)rpm_setpoint;
 	}
 
     // Update PWM compare value (this changes the duty cycle)
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, new_ccr_value);
 
     // Optional: Add debugging output (remove in production)
-    // printf("RPM: %d, PWM: %lu\r\n", rpm_set, new_pwm_value);
+    // printf("RPM: %d, PWM: %lu\r\n", rpm_setpoint, new_pwm_value);
 }
 
 
-void pid_pwm_update(void) {
+void pid_pwm_update(float rpm_setpoint) {
 
 	/*
 	 * motor_rpm set in TIM3 Hall Sensor Trigger interrupt
-	 * rpm_set set within I2C receive callback function
+	 * rpm_setpoint set within I2C receive callback function
 	 * Calculate error from these two values
 	 * Use error to find P, I, & D
 	 * Calculate set point via the tuned PID weights
 	 * Use this set point in update_pwm to output signal to motor driver
 	 */
 
-	// Compute PID output
-	PID_Compute(&motor_pid, (float)rpm_set, motor_rpm, dt);
+	// Compute PID output. PID output is a pulse width adjustment
+	// FIXME: (Low) Update PID to compute with fixed point instead of float?
+	PID_Compute(&motor_pid, rpm_setpoint, motor_rpm, dt);
 
 
-	// Computes pulse_width value and then converts to a new CCR value
+	// Computes new pulse_width value and then converts to CCR value
 	float pulse_width = PWM_ZERO_PULSEWIDTH + motor_pid.output;
 	uint32_t ccr_output = (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_width);
 
-	// FIXME: Clamp CCR output. Might not be necessary since PID output is already clamped
-	if(ccr_output < PWM_CCR_MIN) {
-		ccr_output = PWM_CCR_MIN;
+	// FIXME: (Low) Clamp CCR output. Minimum set to 1.5ms due to lack of reversing logic
+	// Might not be necessary once reversing logic added since PID output is already clamped
+	// FIXME: (Low) Add Reversing Logic
+	if(ccr_output < PWM_CCR_DEFAULT) {
+		ccr_output = PWM_CCR_DEFAULT;
 	} else if (ccr_output > PWM_CCR_MAX) {
 		ccr_output = PWM_CCR_MAX;
 	}
@@ -156,31 +195,37 @@ void pid_pwm_update(void) {
  * @param rpm: RPM value received from I2C (0 to RPM_MAX_VALUE)
  * @retval PWM compare value (0 to PWM_MAX_VALUE)
  *
- * This function maps the RPM value to appropriate PWM duty cycle.
+ * This function maps the RPM value to appropriate PWM duty cycle for open loop control.
  * You can modify this function to implement different control algorithms.
  * ***Unneeded for now since we are taking in raw CCR values
  */
-//uint32_t rpm_to_pwm_duty(int16_t rpm)
-//{
-//    uint32_t pwm_value;
-//
-//    // Ensure RPM is within valid range
-//    if (rpm < 0) {
-//        rpm = 0;
-//    } else if (rpm > RPM_MAX_VALUE) {
-//        rpm = RPM_MAX_VALUE;
-//    }
-//
-//    // Linear mapping: PWM = (RPM / RPM_MAX) * PWM_MAX
-//    pwm_value = ((uint32_t)rpm * PWM_MAX_DUTY) / RPM_MAX_VALUE;
-//
-//    // Ensure PWM value is within bounds
-//    if (pwm_value > PWM_MAX_DUTY) {
-//        pwm_value = PWM_MAX_DUTY;
-//    }
-//
-//    return pwm_value;
-//}
+// FIXME: (High) Update function (as explained in openloop_pwm_update)
+// Test some ccr values and rpm outputs to get a linear model with regression
+uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint)
+{
+	/*
+    uint32_t pwm_value;
+
+    // Ensure RPM is within valid range
+    if (rpm < 0) {
+        rpm = 0;
+    } else if (rpm > RPM_MAX_VALUE) {
+        rpm = RPM_MAX_VALUE;
+    }
+
+    // Linear mapping: PWM = (RPM / RPM_MAX) * PWM_MAX
+    pwm_value = ((uint32_t)rpm * PWM_MAX_DUTY) / RPM_MAX_VALUE;
+
+    // Ensure PWM value is within bounds
+    if (pwm_value > PWM_MAX_DUTY) {
+        pwm_value = PWM_MAX_DUTY;
+    }
+
+    return pwm_value;
+    */
+	return 0;
+}
+
 
 /* End Function Definition */
 
@@ -194,34 +239,35 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 }
 
 void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
-//	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_RESET);
-////	HAL_Delay(200);
-//	HAL_GPIO_WritePin(GPIOC, LED_Green_Pin, GPIO_PIN_SET);
-	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin);
 
-//	pwm_update_flag = 1; // not needed anymore, setpoint update in callback function (i.e. interrupt)
+	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin); // FIXME: Debugging purposes, remove later
 
 	// Re-arm the I2C to receive the next byte
-	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&rpm_set, 2);
-//	HAL_I2C_Slave_Transmit_IT(&hi2c1, &rpm_set, 2); /* I2C Transmitting only used for testing purposes */
+	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&speed_setpoint, 2);
+
+	/* I2C Transmitting only used for testing purposes */
+	//	HAL_I2C_Slave_Transmit_IT(&hi2c1, &rpm_setpoint, 2);
+
+	speed_update_flag = 1;
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-    /* FIXME: May be an issue that this only updates when TIM3 is triggered by the
-     * motor spinning?? i.e. when the wheel stops does the controller incorrectly
-     * output an rpm that's *not* 0?
-     */
 	/*
-	 * FIXME: Potential fix: use HAL_GetTick() to see how long it has been since last trigger.
-	 * If it's been more than X ms then set motor_rpm = 0
+	 * FIXME: (Very High) Needs addition to account for motor not spinning (causing hal sensors to not update)
+	 *  Potential fix: use HAL_GetTick() to see how long it has been since last trigger.
+	 * If it's been more than X ms then set motor_rpm = 0. Or use another timer.
 	 */
+
+	// FIXME: (Low) Update interrupt priority to be greater than PID_update
+
 	if (htim->Instance == TIM3) { // Must make sure we're only processing TIM3's events
         // Hall sensor capture event
-//        hall_capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1); // Reads from capture channel 1, same as line below
+		//hall_capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1); // Reads from capture channel 1, same as line below
         hall_capture_value = htim->Instance->CCR1; // Compare/Capture Register 1 store # of ticks between transitions
 
-        // FIXME: divide by 2.0f bc RPM too high?? TBD (MAX rpm = ~38k, should be ~20k
+        // FIXME: (Medium) divide by 2.0f bc RPM too high?? TBD (MAX rpm = ~38k, should be ~20k -> Find way to check hall sensor accuracy
+        // FIXME: (High) Computation needs to be moved outside interrupt
         if (hall_capture_value > 0) {
         	// 1. Convert time between hall sensor edge transitions from # of ticks
         	// Freq = 720kHz | 1/Freq = time per clock tick = 1.39us | # of ticks between edges * seconds/tick = # of seconds between edges
@@ -231,6 +277,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
             // 3. Convert to Rotations per Minute
             // 6 transitions per 1 full rotation | 60 seconds in a minute
             // # of ticks per transition * 60 seconds / minute / (6 transitions/rotation) = Rotation per Minute
+            // FIXME: (Low) Update output to be integer
             motor_rpm = (frequency * 60.0f) / 6.0f;
         }
     }
