@@ -25,6 +25,9 @@ volatile uint8_t speed_update_flag = 0;
 // FIXME: (High) motor_rpm hould probably be int16_t since magnitude on order of hundreds
 volatile float motor_rpm = 0;
 volatile uint32_t hall_capture_value = 0;
+// value below uses HAL_GetTick() to measure time between last time the motor sent an rpm value
+// resolves issue of motor rpm not updating to 0 when motor was not spinning
+volatile uint32_t lastHallSensorUpdate = 0;
 
 PID_t motor_pid; // Instantiate motor PID controller
 
@@ -166,6 +169,9 @@ void pid_pwm_update(float rpm_setpoint) {
 	 * Calculate set point via the tuned PID weights
 	 * Use this set point in update_pwm to output signal to motor driver
 	 */
+	if((HAL_GetTick() - lastHallSensorUpdate) > 200) {
+		motor_rpm = 0;
+	}
 
 	// Compute PID output. PID output is a pulse width adjustment
 	// FIXME: (Low) Update PID to compute with fixed point instead of float?
@@ -265,6 +271,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
         // Hall sensor capture event
 		//hall_capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1); // Reads from capture channel 1, same as line below
         hall_capture_value = htim->Instance->CCR1; // Compare/Capture Register 1 store # of ticks between transitions
+        lastHallSensorUpdate = HAL_GetTick();
 
         // FIXME: (Medium) divide by 2.0f bc RPM too high?? TBD (MAX rpm = ~38k, should be ~20k -> Find way to check hall sensor accuracy
         // FIXME: (High) Computation needs to be moved outside interrupt
