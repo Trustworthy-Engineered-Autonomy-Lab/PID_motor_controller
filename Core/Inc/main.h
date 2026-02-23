@@ -59,6 +59,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define TIM1_PSC 99
+#define TIM1_CTR_PER 10799
+#define TIM2_PSC 99
+#define TIM2_CTR_PER 14399
+#define TIM3_PSC 219
+#define TIM3_CTR_PER 65535
 #define LED_Green_Pin GPIO_PIN_13
 #define LED_Green_GPIO_Port GPIOC
 

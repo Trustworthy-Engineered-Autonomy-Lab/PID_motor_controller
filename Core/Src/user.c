@@ -16,14 +16,15 @@ extern TIM_HandleTypeDef htim3;
 
 // make following variables volatile since they are altered within constantly by ISR
 // FIXME: (Low) Eventual change to fixed point arithmetic (or purchase chip with FPU)
-// FIXME: (High) speed_setpoint should def be float when real speed values are used, kept as int16_t until
-// speed to rpm conversion figured out
+/* FIXME: (High) speed_setpoint should def be float when real speed values are used, kept as int16_t until
+ speed to rpm conversion figured out */
 volatile int16_t speed_setpoint = 0;
 volatile uint8_t pwm_update_flag = 0;
 volatile uint8_t pid_update_flag = 0;
 volatile uint8_t speed_update_flag = 0;
+volatile uint8_t hall_update_flag = 0;
 // FIXME: (High) motor_rpm hould probably be int16_t since magnitude on order of hundreds
-volatile float motor_rpm = 0;
+static volatile float motor_rpm = 0;
 volatile uint32_t hall_capture_value = 0;
 // value below uses HAL_GetTick() to measure time between last time the motor sent an rpm value
 // resolves issue of motor rpm not updating to 0 when motor was not spinning
@@ -33,23 +34,26 @@ PID_t motor_pid; // Instantiate motor PID controller
 
 // PID values
 // FIXME: (High) Start tuning controller
-const float dt = 0.015f; // PID update rate
-const float Kp = 0.0005; // Proportional Coefficient
-const float Ki = 0; // Integral Coefficient
+const float dt = TIM1_PER_MS / 1000; // PID update rate
+const float Kp = 0.00001; // Proportional Coefficient
+const float Ki = 0.000005; // Integral Coefficient
 const float Kd = 0; // Derivative Coefficient
 // FIXME: (Medium) Calibrate better integral clamp
-const float Integral_max = 500.0f; // Anti-windup value
+const float Integral_max = 100000.0f; // Anti-windup value
 const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH; // 1.5ms +- .5ms
 
 
 /* End Variable Definitions */
 
 /* Function Declarations */
+void TIM_PER_CHECK(void);
+
 // FIXME: (Medium) Update rpm/speed_setpoint types later
 float rpm_update(int16_t speed_setpoint);
 void openloop_pwm_update(float rpm_setpoint);
 void pid_pwm_update(float rpm_setpoint);
 uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint);
+void User_Error_Handler(uint8_t count);
 
 
 /* End Function Declarations */
@@ -57,6 +61,7 @@ uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint);
 /* Function Definitions */
 
 void User_Init(void){ // Initialization function
+	TIM_PER_CHECK();
 
 	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&speed_setpoint, 2); // FIXME: Why is this here?
 
@@ -64,7 +69,9 @@ void User_Init(void){ // Initialization function
 
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, PWM_CCR_DEFAULT); // Default pulse width = 1.5ms
 
-	HAL_TIMEx_HallSensor_Start_IT(&htim3);
+	HAL_TIMEx_HallSensor_Start_IT(&htim3); // Start timer 3 with IC Interrupt
+	HAL_TIM_Base_Start_IT(&htim3); // Starts timer 3 overflow interrupt
+
 	HAL_TIM_Base_Start_IT(&htim1); // start timer 1
 
 
@@ -88,6 +95,11 @@ void User_Loop(void){ // Main Loop
 		rpm_setpoint = rpm_update(speed_setpoint);
 	}
 
+	// Checks if there is a hall sensor update
+	if (hall_update_flag == 1){
+		// FIXME: Add computation here as well
+		hall_update_flag = 0;
+	}
 
 	// Check if new I2C data received and PWM needs updating
 	if (pid_update_flag == 1){ // pid updated every 10ms via TIM1
@@ -95,6 +107,26 @@ void User_Loop(void){ // Main Loop
 		pid_pwm_update(rpm_setpoint);
 	}
 	// Note: Starts ESC at 1.5ms pulse width, then stay between 1ms and 2ms
+}
+
+// Checks that timer periods generated from CubeMX are what we want them to be
+void TIM_PER_CHECK(void){
+	// Checks if error within .1ms
+	if(fabs(TIM1_PER_MS - EXPECTED_TIM1_PER_MS) > .1){
+		User_Error_Handler(1);
+	}
+
+	// Checks if error within .1ms
+	if(fabs(TIM2_PER_MS - EXPECTED_TIM2_PER_MS) > .1){
+		User_Error_Handler(2);
+	}
+
+	// Checks if error within 1ms
+	if(fabs(TIM3_PER_MS - EXPECTED_TIM3_PER_MS) > 1){
+		User_Error_Handler(3);
+	}
+
+
 }
 
 
@@ -122,20 +154,21 @@ void openloop_pwm_update(float rpm_setpoint) // non_pid algo
 {
 	/* FIXME: (High) Even for debugging purposes, basic open loop rpm to pulse width conversion
 	needed so we can start sending speed values over Jetson instead of changing what we send
-	based off of if we use the open loop or closed loop functions.
+	based off of if we use the open loop or closed loop functions. */
 
+	/*
     Code below not used since we're taking in raw CCR values for now
     uint32_t new_pwm_value;
 
-    // Convert RPM to PWM duty cycle
+    Convert RPM to PWM duty cycle
 	new_pwm_value = rpm_to_pwm_duty(rpm_setpoint);
 
-	// Update PWM compare value (this changes the duty cycle)
+	Update PWM compare value (this changes the duty cycle)
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, new_pwm_value);
 
-    // used for later development, for now we will directly read CCR from I2C
-    // Convert RPM to PWM duty cycle
-//    new_pwm_value = rpm_to_pwm_duty(rpm_setpoint);
+    used for later development, for now we will directly read CCR from I2C
+    Convert RPM to PWM duty cycle
+	new_pwm_value = rpm_to_pwm_duty(rpm_setpoint);
 
      */
 
@@ -169,9 +202,6 @@ void pid_pwm_update(float rpm_setpoint) {
 	 * Calculate set point via the tuned PID weights
 	 * Use this set point in update_pwm to output signal to motor driver
 	 */
-	if((HAL_GetTick() - lastHallSensorUpdate) > 200) {
-		motor_rpm = 0;
-	}
 
 	// Compute PID output. PID output is a pulse width adjustment
 	// FIXME: (Low) Update PID to compute with fixed point instead of float?
@@ -182,8 +212,8 @@ void pid_pwm_update(float rpm_setpoint) {
 	float pulse_width = PWM_ZERO_PULSEWIDTH + motor_pid.output;
 	uint32_t ccr_output = (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_width);
 
-	// FIXME: (Low) Clamp CCR output. Minimum set to 1.5ms due to lack of reversing logic
-	// Might not be necessary once reversing logic added since PID output is already clamped
+	/* FIXME: (Low) Clamp CCR output. Minimum set to 1.5ms due to lack of reversing logic
+	Might not be necessary once reversing logic added since PID output is already clamped */
 	// FIXME: (Low) Add Reversing Logic
 	if(ccr_output < PWM_CCR_DEFAULT) {
 		ccr_output = PWM_CCR_DEFAULT;
@@ -205,8 +235,8 @@ void pid_pwm_update(float rpm_setpoint) {
  * You can modify this function to implement different control algorithms.
  * ***Unneeded for now since we are taking in raw CCR values
  */
-// FIXME: (High) Update function (as explained in openloop_pwm_update)
-// Test some ccr values and rpm outputs to get a linear model with regression
+/* FIXME: (High) Update function (as explained in openloop_pwm_update)
+ Test some ccr values and rpm outputs to get a linear model with regression */
 uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint)
 {
 	/*
@@ -242,11 +272,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     if (htim->Instance == TIM1) {
         pid_update_flag = 1;  // Signal main loop to run PID
     }
+
+    if (htim->Instance == TIM3) {
+    	if (hall_update_flag == 0){
+    		// Checks that update wasn't triggered by IC
+    		motor_rpm = 0;  // hall sensor timeout -> rpm set to 0
+    		hall_update_flag = 1;
+    	}
+
+    }
+
 }
 
 void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
-
-	HAL_GPIO_TogglePin(GPIOC, LED_Green_Pin); // FIXME: Debugging purposes, remove later
 
 	// Re-arm the I2C to receive the next byte
 	HAL_I2C_Slave_Receive_IT(&hi2c1, (uint8_t*)&speed_setpoint, 2);
@@ -259,11 +297,7 @@ void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c){
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-	/*
-	 * FIXME: (Very High) Needs addition to account for motor not spinning (causing hal sensors to not update)
-	 *  Potential fix: use HAL_GetTick() to see how long it has been since last trigger.
-	 * If it's been more than X ms then set motor_rpm = 0. Or use another timer.
-	 */
+	hall_update_flag = 1;
 
 	// FIXME: (Low) Update interrupt priority to be greater than PID_update
 
@@ -271,14 +305,12 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
         // Hall sensor capture event
 		//hall_capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1); // Reads from capture channel 1, same as line below
         hall_capture_value = htim->Instance->CCR1; // Compare/Capture Register 1 store # of ticks between transitions
-        lastHallSensorUpdate = HAL_GetTick();
 
         // FIXME: (Medium) divide by 2.0f bc RPM too high?? TBD (MAX rpm = ~38k, should be ~20k -> Find way to check hall sensor accuracy
         // FIXME: (High) Computation needs to be moved outside interrupt
         if (hall_capture_value > 0) {
         	// 1. Convert time between hall sensor edge transitions from # of ticks
-        	// Freq = 720kHz | 1/Freq = time per clock tick = 1.39us | # of ticks between edges * seconds/tick = # of seconds between edges
-            float time_between_edges = hall_capture_value / 720000.0f;
+            float time_between_edges = (float)hall_capture_value * TIM2_PSC / CLK_FREQ;
             // 2. Store frequency of hall sensor edge transitions as # of ticks per transition
             float frequency = 1.0f / time_between_edges;
             // 3. Convert to Rotations per Minute
@@ -291,6 +323,36 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 }
 
 /* End Interrupt Functions */
+
+// Custom Error Handler
+// FIXME: (Low) More robust error handler (set it up to send a message with UART or SWO instead of just blinking an LED)
+/*
+ * Codes:
+ * 1 blink: TIM1 Period wrong
+ * 2 blink: TIM2 Period wrong
+ * 3 blink: TIM3 Period wrong
+ */
+void User_Error_Handler(uint8_t code)
+{
+
+  __disable_irq(); // Block loops needed because no SysTick interrupts
+  HAL_GPIO_WritePin(LED_Green_GPIO_Port, LED_Green_Pin, GPIO_PIN_SET); // Turn LED Off
+  while (1) // Blinks Green LED to display error
+  {
+      // blink LED 'code' times
+      for (uint8_t i=0; i<code; i++)
+      {
+
+          HAL_GPIO_TogglePin(LED_Green_GPIO_Port, LED_Green_Pin);
+          for (volatile uint32_t i = 0; i < 800000; i++) {}; // Very rough estimate of about 200ms
+          HAL_GPIO_TogglePin(LED_Green_GPIO_Port, LED_Green_Pin);
+          for (volatile uint32_t i = 0; i < 800000; i++) {}; // Very rough estimate of about 200ms
+      }
+      for (volatile uint32_t i = 0; i < 4000000; i++) {}; // Very rough estimate of about 1s
+
+  }
+
+}
 
 
 
