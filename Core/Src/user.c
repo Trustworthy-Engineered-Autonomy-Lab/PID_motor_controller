@@ -25,6 +25,9 @@ volatile uint8_t speed_update_flag = 0;
 volatile uint8_t hall_update_flag = 0;
 // FIXME: (High) motor_rpm hould probably be int16_t since magnitude on order of hundreds
 static volatile float motor_rpm = 0;
+// TODO: understand if there are any efficiency issues with changing rpm_setpoint to a gloabl static variable
+// 		 rather than in the function's scope
+static volatile float rpm_setpoint = 0;
 volatile uint32_t hall_capture_value = 0;
 // value below uses HAL_GetTick() to measure time between last time the motor sent an rpm value
 // resolves issue of motor rpm not updating to 0 when motor was not spinning
@@ -87,7 +90,9 @@ void User_Init(void){ // Initialization function
 
 void User_Loop(void){ // Main Loop
 	// FIXME: (Medium) rpm_setpoint should probably be uint16_t
-	static float rpm_setpoint; // Static to stay the same until new i2c command
+	// TODO: understand if there are any efficiency issues with changing  to a gloabl static variable
+	// 		 rather than in the function's scope
+//	static float rpm_setpoint; // Static to stay the same until new i2c command
 
 	// Check if new speed target has been received
 	if (speed_update_flag == 1){
