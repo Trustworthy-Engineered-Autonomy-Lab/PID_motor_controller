@@ -315,14 +315,14 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
         // FIXME: (High) Computation needs to be moved outside interrupt
         if (hall_capture_value > 0) {
         	// 1. Convert time between hall sensor edge transitions from # of ticks
-            float time_between_edges = (float)hall_capture_value * TIM2_PSC / CLK_FREQ;
+            float time_between_edges = (float)hall_capture_value * (TIM3_PSC + 1) / CLK_FREQ;
             // 2. Store frequency of hall sensor edge transitions as # of ticks per transition
             float frequency = 1.0f / time_between_edges;
             // 3. Convert to Rotations per Minute
             // 6 transitions per 1 full rotation | 60 seconds in a minute
             // # of ticks per transition * 60 seconds / minute / (6 transitions/rotation) = Rotation per Minute
             // FIXME: (Low) Update output to be integer
-            motor_rpm = (frequency * 60.0f) / 6.0f;
+            motor_rpm = (frequency * 60.0f) / 12.0f;
         }
     }
 }
