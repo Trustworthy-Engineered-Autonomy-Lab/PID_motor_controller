@@ -53,6 +53,13 @@
 #define PWM_PULSEWIDTH_TO_CCR(p) PWM_DUTYCYCLE_TO_CCR(PWM_PULSEWIDTH_TO_DUTYCYCLE(p))
 
 
+#define HALL_EDGES_PER_REV 12.0f
+
+#define HALL_CAPTURE_TO_RPM(capture_value) \
+    ((CLK_FREQ * 60.0f) / ((float)(capture_value) * (TIM3_PSC + 1) * HALL_EDGES_PER_REV))
+
+#define MIN_MOTOR_RPM HALL_CAPTURE_TO_RPM(TIM3_CTR_PER)
+
 /* End Macros */
 
 
