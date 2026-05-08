@@ -23,6 +23,10 @@ volatile uint8_t pwm_update_flag = 0;
 volatile uint8_t pid_update_flag = 0;
 volatile uint8_t speed_update_flag = 0;
 volatile uint8_t hall_update_flag = 0;
+
+volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;
+volatile uint32_t debug_pwm_ccr = 0;
+
 // FIXME: (High) motor_rpm hould probably be int16_t since magnitude on order of hundreds
 static volatile float motor_rpm = 0;
 // TODO: understand if there are any efficiency issues with changing rpm_setpoint to a gloabl static variable
@@ -62,6 +66,25 @@ void User_Error_Handler(uint8_t count);
 /* End Function Declarations */
 
 /* Function Definitions */
+uint32_t pwm_us_to_ccr(int16_t pulse_us);
+
+uint32_t pwm_us_to_ccr(int16_t pulse_us)
+{
+    if (pulse_us < 1000) {
+        pulse_us = 1000;
+    } else if (pulse_us > 2000) {
+        pulse_us = 2000;
+    }
+
+    /*
+     * PWM_PULSEWIDTH_TO_CCR() 原来接收的是 ms，
+     * 所以 1500 us 要先变成 1.5 ms。
+     */
+    float pulse_ms = (float)pulse_us / 1000.0f;
+
+    return (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_ms);
+}
+
 
 void User_Init(void){ // Initialization function
 	TIM_PER_CHECK();
@@ -88,7 +111,7 @@ void User_Init(void){ // Initialization function
 			);
 }
 
-void User_Loop(void){ // Main Loop
+/*void User_Loop(void){ // Main Loop
 	// FIXME: (Medium) rpm_setpoint should probably be uint16_t
 	// TODO: understand if there are any efficiency issues with changing  to a gloabl static variable
 	// 		 rather than in the function's scope
@@ -112,6 +135,40 @@ void User_Loop(void){ // Main Loop
 		pid_pwm_update(rpm_setpoint);
 	}
 	// Note: Starts ESC at 1.5ms pulse width, then stay between 1ms and 2ms
+}*/
+
+void User_Loop(void)
+{
+    /*
+     * Open-loop PWM pulse-width test mode:
+     * I2C speed_setpoint is treated as PWM pulse width in microseconds.
+     *
+     * Examples:
+     * speed_setpoint = 1000 -> 1.000 ms
+     * speed_setpoint = 1500 -> 1.500 ms, neutral / stop
+     * speed_setpoint = 1550 -> 1.550 ms
+     * speed_setpoint = 2000 -> 2.000 ms
+     */
+
+    if (speed_update_flag == 1) {
+        speed_update_flag = 0;
+    }
+
+    if (hall_update_flag == 1) {
+        hall_update_flag = 0;
+    }
+
+    if (pid_update_flag == 1) {
+        pid_update_flag = 0;
+
+        int16_t pulse_us = PWM_US_CLAMP(speed_setpoint);
+        uint32_t pwm_ccr = PWM_US_TO_CCR(pulse_us);
+
+        debug_pwm_us = pulse_us;
+        debug_pwm_ccr = pwm_ccr;
+
+        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_ccr);
+    }
 }
 
 // Checks that timer periods generated from CubeMX are what we want them to be

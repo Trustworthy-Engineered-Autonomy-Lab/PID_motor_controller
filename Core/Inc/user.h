@@ -60,6 +60,20 @@
 
 #define MIN_MOTOR_RPM HALL_CAPTURE_TO_RPM(TIM3_CTR_PER)
 
+
+#define PWM_US_MIN              1000
+#define PWM_US_NEUTRAL          1500
+#define MOTOR_MIN_START_US      1550
+#define PWM_US_MAX              2000
+
+#define PWM_US_TO_MS(us)        ((float)(us) / 1000.0f)
+
+#define PWM_US_CLAMP(us)        \
+    (((us) < PWM_US_MIN) ? PWM_US_MIN : (((us) > PWM_US_MAX) ? PWM_US_MAX : (us)))
+
+#define PWM_US_TO_CCR(us)       \
+    ((uint32_t)PWM_PULSEWIDTH_TO_CCR(PWM_US_TO_MS(PWM_US_CLAMP(us))))
+
 /* End Macros */
 
 
