@@ -10,6 +10,8 @@
 
 /* Includes */
 #include "stm32f1xx_hal.h"
+#include "stm32f1xx_ll_i2c.h"
+#include "stm32f1xx_ll_bus.h"
 #include "main.h"
 #include "pid.h"
 #include <math.h>
@@ -82,6 +84,16 @@
 void User_Init(void);
 void User_Loop(void);
 
+void I2C_LL_RxByte(uint8_t data);
+void I2C_LL_StopDetected(void);
+
+extern volatile uint16_t i2c_rx_len;
+
+extern volatile uint16_t debug_i2c_rx_len;
+extern volatile uint8_t debug_i2c_start_reg;
+extern volatile uint32_t debug_i2c_frame_count;
+extern volatile uint32_t debug_i2c_overflow_count;
+extern volatile uint32_t debug_i2c_discard_count;
 
 /* End Function Declarations */
 

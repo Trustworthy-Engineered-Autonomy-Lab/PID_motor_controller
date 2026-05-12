@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f1xx_it.h"
+#include "user.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
@@ -55,7 +56,6 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern I2C_HandleTypeDef hi2c1;
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN EV */
@@ -234,9 +234,36 @@ void TIM3_IRQHandler(void)
 void I2C1_EV_IRQHandler(void)
 {
   /* USER CODE BEGIN I2C1_EV_IRQn 0 */
+	/*
+	   * ADDR：主机寻址到本 STM32。
+	   * 对于一次新的写传输，清空 i2c_rx_len，准备接收新帧。
+	   */
+	  if (LL_I2C_IsActiveFlag_ADDR(I2C1))
+	  {
+	      LL_I2C_ClearFlag_ADDR(I2C1);
+	      i2c_rx_len = 0;
+	  }
 
+	  /*
+	   * RXNE：收到 1 个字节。
+	   * 必须读取 DR，否则 I2C 会卡住。
+	   */
+	  if (LL_I2C_IsActiveFlag_RXNE(I2C1))
+	  {
+	      uint8_t data = LL_I2C_ReceiveData8(I2C1);
+	      I2C_LL_RxByte(data);
+	  }
+
+	  /*
+	   * STOP：主机结束本次写入。
+	   * 此时 i2c_rx_buf[0..i2c_rx_len-1] 是一帧完整命令。
+	   */
+	  if (LL_I2C_IsActiveFlag_STOP(I2C1))
+	  {
+	      LL_I2C_ClearFlag_STOP(I2C1);
+	      I2C_LL_StopDetected();
+	  }
   /* USER CODE END I2C1_EV_IRQn 0 */
-  HAL_I2C_EV_IRQHandler(&hi2c1);
   /* USER CODE BEGIN I2C1_EV_IRQn 1 */
 
   /* USER CODE END I2C1_EV_IRQn 1 */
@@ -248,9 +275,39 @@ void I2C1_EV_IRQHandler(void)
 void I2C1_ER_IRQHandler(void)
 {
   /* USER CODE BEGIN I2C1_ER_IRQn 0 */
+	/*
+	   * BERR: Bus error
+	   */
+	  if (LL_I2C_IsActiveFlag_BERR(I2C1))
+	  {
+	      LL_I2C_ClearFlag_BERR(I2C1);
+	  }
 
+	  /*
+	   * ARLO: Arbitration lost
+	   */
+	  if (LL_I2C_IsActiveFlag_ARLO(I2C1))
+	  {
+	      LL_I2C_ClearFlag_ARLO(I2C1);
+	  }
+
+	  /*
+	   * AF: Acknowledge failure
+	   * 在从机模式下，主机结束通信时有时会触发 AF。
+	   */
+	  if (LL_I2C_IsActiveFlag_AF(I2C1))
+	  {
+	      LL_I2C_ClearFlag_AF(I2C1);
+	  }
+
+	  /*
+	   * OVR: Overrun / underrun
+	   */
+	  if (LL_I2C_IsActiveFlag_OVR(I2C1))
+	  {
+	      LL_I2C_ClearFlag_OVR(I2C1);
+	  }
   /* USER CODE END I2C1_ER_IRQn 0 */
-  HAL_I2C_ER_IRQHandler(&hi2c1);
   /* USER CODE BEGIN I2C1_ER_IRQn 1 */
 
   /* USER CODE END I2C1_ER_IRQn 1 */
