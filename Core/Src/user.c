@@ -1,42 +1,134 @@
 /*
  * 当前版本说明：
- * 1. 代码当前处于“I2C 变长寄存器控制模式”。
- *    Jetson / 上位机通过 I2C 向 STM32 写入变长命令：
  *
- *      第 1 字节：起始寄存器地址
- *      后续字节：从该地址开始依次写入的数据
+ * 1. 本文件实现 STM32 端电机控制逻辑，当前采用“I2C 变长寄存器控制模式”。
+ *    Jetson / 上位机通过 I2C 向 STM32 写入一帧变长命令：
  *
- *    STM32 收到 STOP 条件后，认为本帧命令结束，
- *    然后从起始寄存器开始依次写入 reg_map[]。
+ *      第 1 字节：起始寄存器地址 start_reg
+ *      后续字节：从 start_reg 开始，按地址递增依次写入的软件寄存器数据
  *
- *    如果写入地址超过预设寄存器表范围 REG_MAP_SIZE，
- *    超出的数据会被读取但舍弃，避免 I2C 卡死或越界写入。
+ *    例如：
+ *      i2ctransfer -y 7 w4@0x08 0x01 0x01 0x0E 0x06
  *
- * 2. 当前软件寄存器表：
+ *    含义为：
+ *      从寄存器 0x01 开始连续写入 3 个数据：
+ *        reg_map[0x01] = 0x01  -> 开环 PWM 模式
+ *        reg_map[0x02] = 0x0E  -> PWM 脉宽低字节
+ *        reg_map[0x03] = 0x06  -> PWM 脉宽高字节
+ *
+ *      最终 target_pwm_us = 0x060E = 1550 us。
+ *
+ * 2. STM32 的 I2C1 当前使用 LL 库接收数据。
+ *    I2C 字节接收不再使用 HAL_I2C_Slave_Receive_IT()，
+ *    而是在 I2C1_EV_IRQHandler() 中逐字节读取 RXNE 数据。
+ *
+ *    接收流程：
+ *      ADDR 中断：主机寻址到 STM32，清空 i2c_rx_len，准备接收新一帧
+ *      RXNE 中断：每收到 1 字节，调用 I2C_LL_RxByte() 保存到 i2c_rx_buf[]
+ *      STOP 中断：主机结束本次传输，调用 I2C_LL_StopDetected() 解析整帧数据
+ *
+ * 3. 当前软件寄存器表 reg_map[]：
  *      REG_MODE         = 0x01：控制模式寄存器
  *      REG_PWM_US_L     = 0x02：开环 PWM 脉宽低字节
  *      REG_PWM_US_H     = 0x03：开环 PWM 脉宽高字节
  *      REG_TARGET_RPM_L = 0x04：目标 RPM 低字节
  *      REG_TARGET_RPM_H = 0x05：目标 RPM 高字节
  *
- * 3. 当前控制模式：
- *      MOTOR_MODE_STOP         = 0：停止模式，强制输出中位 PWM
- *      MOTOR_MODE_OPENLOOP_PWM = 1：开环 PWM 模式，输出 target_pwm_us
- *      MOTOR_MODE_PID_RPM      = 2：PID RPM 模式，调用 pid_pwm_update()
+ *    如果上位机连续写入的数据超过 REG_MAP_SIZE 定义的寄存器范围，
+ *    超出的数据会被读取但舍弃，避免越界写入或 I2C 总线卡死。
  *
- * 4. 推荐上位机使用 i2ctransfer：
+ * 4. 当前支持 3 种控制模式：
+ *      MOTOR_MODE_STOP         = 0：停止模式，强制输出中位 PWM，通常为 1500 us
+ *      MOTOR_MODE_OPENLOOP_PWM = 1：开环 PWM 模式，直接输出 target_pwm_us
+ *      MOTOR_MODE_PID_RPM      = 2：PID RPM 模式，根据 target_rpm 和 motor_rpm 做闭环控制
  *
- *      只进入开环模式：
- *      i2ctransfer -y 7 w2@0x08 0x01 0x01
+ * 5. 当前主要稳定使用的是 MOTOR_MODE_OPENLOOP_PWM。
+ *    MOTOR_MODE_PID_RPM 已经接入 pid_pwm_update()，但 PID 参数和低速测速稳定性
+ *    仍需要后续继续调试。
  *
- *      只写 PWM = 1550 us：
- *      i2ctransfer -y 7 w3@0x08 0x02 0x0E 0x06
+ * 6. TIM1 周期性置位 pid_update_flag。
+ *    虽然变量名仍叫 pid_update_flag，但在当前版本中它更准确地表示
+ *    “控制循环刷新标志”：开环模式下用于周期性刷新 PWM，PID 模式下用于周期性执行 PID。
+ */
+
+/*
+ * STM32CubeMonitor 建议监控变量：
  *
- *      一条命令进入开环模式并写 PWM = 1550 us：
- *      i2ctransfer -y 7 w4@0x08 0x01 0x01 0x0E 0x06
+ * 1. I2C 接收与解析相关：
+ *      i2c_rx_len
+ *      debug_i2c_rx_len
+ *      debug_i2c_start_reg
+ *      debug_i2c_frame_count
+ *      debug_i2c_overflow_count
+ *      debug_i2c_discard_count
  *
- * 5. TIM1 仍然周期性置位 pid_update_flag。
- *    该 flag 在当前版本中作为控制循环刷新标志使用。
+ *    含义：
+ *      i2c_rx_len：当前正在接收的一帧数据长度
+ *      debug_i2c_rx_len：最近一帧完整 I2C 命令的长度
+ *      debug_i2c_start_reg：最近一帧命令的起始寄存器地址
+ *      debug_i2c_frame_count：成功收到 STOP 并进入解析流程的帧计数
+ *      debug_i2c_overflow_count：接收缓冲区 i2c_rx_buf[] 已满后丢弃的字节数
+ *      debug_i2c_discard_count：寄存器地址超出 reg_map[] 范围后丢弃的数据数
+ *
+ * 2. 软件寄存器表相关：
+ *      reg_map[1]：控制模式
+ *      reg_map[2]：PWM 脉宽低字节
+ *      reg_map[3]：PWM 脉宽高字节
+ *      reg_map[4]：目标 RPM 低字节
+ *      reg_map[5]：目标 RPM 高字节
+ *
+ * 3. 控制状态相关：
+ *      motor_mode
+ *      debug_motor_mode_view
+ *
+ *    motor_mode 是程序实际使用的控制模式：
+ *      0 = 停止模式
+ *      1 = 开环 PWM 模式
+ *      2 = PID RPM 模式
+ *
+ *    debug_motor_mode_view 是为了在 CubeMonitor 中更直观地观察状态：
+ *      1000 = 停止模式
+ *      2000 = 开环 PWM 模式
+ *      3000 = PID RPM 模式
+ *      9999 = 异常模式
+ *
+ * 4. PWM 输出相关：
+ *      target_pwm_us
+ *      debug_pwm_us
+ *      debug_pwm_ccr
+ *
+ *    target_pwm_us：上位机通过寄存器写入的目标 PWM 脉宽，单位 us
+ *    debug_pwm_us：当前实际输出到 ESC 的 PWM 脉宽，单位 us
+ *    debug_pwm_ccr：当前实际写入 TIM2 CCR 的比较值
+ *
+ * 5. 测速与 PID 相关：
+ *      hall_capture_value
+ *      motor_rpm
+ *      target_rpm
+ *
+ *    motor_rpm 当前在开环模式下主要用于观察；
+ *    在 PID RPM 模式下，motor_rpm 会作为 PID 闭环反馈值。
+ *
+ * 推荐最小监控组合：
+ *      debug_i2c_frame_count
+ *      debug_i2c_rx_len
+ *      debug_i2c_start_reg
+ *      reg_map[1]
+ *      reg_map[2]
+ *      reg_map[3]
+ *      motor_mode
+ *      debug_motor_mode_view
+ *      target_pwm_us
+ *      debug_pwm_us
+ *      debug_pwm_ccr
+ *
+ * 判断链路：
+ *      上位机发送 i2ctransfer
+ *          -> debug_i2c_frame_count 增加
+ *          -> reg_map[] 正确变化
+ *          -> motor_mode / target_pwm_us 正确变化
+ *          -> debug_pwm_us / debug_pwm_ccr 正确变化
+ *          -> 电机实际状态变化
  */
 
 /* Includes */
@@ -262,6 +354,25 @@ uint32_t pwm_us_to_ccr(int16_t pulse_us)
     return (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_ms);
 }
 
+/*
+ * 用户初始化函数。
+ *
+ * main.c 在完成 CubeMX 自动生成的外设初始化后，会调用 User_Init()。
+ * 本函数负责启动本控制逻辑需要的软件状态和外设功能。
+ *
+ * 初始化内容：
+ * 1. 检查 TIM1 / TIM2 / TIM3 的周期是否符合 user.h 中的预期配置；
+ * 2. 初始化软件寄存器表 reg_map[]，默认进入停止模式，PWM = 1500 us；
+ * 3. 启动 LL I2C 从机接收相关中断；
+ * 4. 启动 TIM2 CH2 PWM 输出，并先输出默认中位 PWM；
+ * 5. 启动 TIM3 霍尔传感器输入捕获和溢出中断；
+ * 6. 启动 TIM1 控制周期中断；
+ * 7. 初始化 PID 控制器参数。
+ *
+ * 注意：
+ * 当前 I2C1 已经改为 LL 库模式，因此这里不再调用
+ * HAL_I2C_Slave_Receive_IT()。
+ */
 void User_Init(void)
 {
     TIM_PER_CHECK();
@@ -285,7 +396,20 @@ void User_Init(void)
 }
 
 /*
- * 初始化软件寄存器表默认值。
+ * 初始化软件寄存器表 reg_map[] 的默认值。
+ *
+ * 上电后为了安全，默认设置为：
+ *   REG_MODE = MOTOR_MODE_STOP
+ *   REG_PWM_US_L / REG_PWM_US_H = PWM_US_NEUTRAL，即 1500 us
+ *   REG_TARGET_RPM_L / REG_TARGET_RPM_H = 0
+ *
+ * 初始化完成后调用 Register_Map_Apply()，
+ * 将 reg_map[] 中的默认值同步到实际控制变量：
+ *   motor_mode
+ *   target_pwm_us
+ *   target_rpm
+ *   speed_setpoint
+ *   debug_motor_mode_view
  */
 void Register_Map_Init(void)
 {
@@ -330,11 +454,43 @@ void Update_Debug_Motor_Mode_View(void)
 }
 
 /*
- * 将软件寄存器表 reg_map[] 应用到实际控制变量。
+ * 将软件寄存器表 reg_map[] 中的原始字节数据，
+ * 转换并同步到实际参与控制的变量。
  *
- * 注意：
- * I2C 写入时只修改 reg_map[]；
- * 真正的 motor_mode、target_pwm_us、target_rpm 在这里统一更新。
+ * I2C 接收阶段只负责把数据写入 reg_map[]，
+ * 不直接修改 PWM 输出或 PID 目标。
+ * 这样可以把“通信协议解析”和“控制变量更新”分开，逻辑更清晰。
+ *
+ * 本函数主要做 3 件事：
+ *
+ * 1. 应用控制模式：
+ *      reg_map[REG_MODE] -> motor_mode
+ *
+ *    只接受合法模式：
+ *      0 = MOTOR_MODE_STOP
+ *      1 = MOTOR_MODE_OPENLOOP_PWM
+ *      2 = MOTOR_MODE_PID_RPM
+ *
+ *    如果收到非法模式值，则强制回到 MOTOR_MODE_STOP。
+ *
+ * 2. 应用开环 PWM 脉宽：
+ *      reg_map[REG_PWM_US_L] 和 reg_map[REG_PWM_US_H]
+ *      组合成 16 位 target_pwm_us。
+ *
+ *    组合方式：
+ *      target_pwm_us = low_byte | (high_byte << 8)
+ *
+ *    随后使用 PWM_US_CLAMP() 限幅到 1000~2000 us。
+ *
+ * 3. 应用目标 RPM：
+ *      reg_map[REG_TARGET_RPM_L] 和 reg_map[REG_TARGET_RPM_H]
+ *      组合成 16 位 target_rpm。
+ *
+ *    target_rpm 主要用于 MOTOR_MODE_PID_RPM 模式。
+ *
+ * 另外：
+ *   speed_setpoint 是旧版调试变量，会同步为 target_pwm_us，
+ *   方便继续在 CubeMonitor 中观察。
  */
 void Register_Map_Apply(void)
 {
@@ -390,10 +546,20 @@ void Register_Map_Apply(void)
 }
 
 /*
- * LL I2C 每收到 1 个字节时调用。
+ * LL I2C 字节接收函数。
  *
- * 如果缓冲区未满，就保存；
- * 如果缓冲区已满，字节已经从 DR 读出，但不保存，相当于丢弃。
+ * 该函数由 I2C1_EV_IRQHandler() 在 RXNE 标志置位时调用。
+ * RXNE 表示 I2C1 数据寄存器中已经收到 1 个新字节。
+ *
+ * 工作逻辑：
+ *   1. 如果 i2c_rx_buf[] 还没有满，则把该字节保存到缓冲区；
+ *   2. i2c_rx_len 自增，记录当前帧已经收到的字节数；
+ *   3. 如果缓冲区已满，则该字节虽然已经从 I2C 数据寄存器读出，
+ *      但不再保存，只增加 debug_i2c_overflow_count。
+ *
+ * 注意：
+ * 必须在中断里读取 I2C 数据寄存器，否则 RXNE 不会清除，
+ * I2C 总线可能卡住，导致上位机出现 connection timed out。
  */
 void I2C_LL_RxByte(uint8_t data)
 {
@@ -409,13 +575,46 @@ void I2C_LL_RxByte(uint8_t data)
 }
 
 /*
- * LL I2C 检测到 STOP 条件时调用。
+ * LL I2C STOP 条件处理函数。
  *
- * 当前协议：
- *   i2c_rx_buf[0] = 起始寄存器地址
- *   i2c_rx_buf[1...] = 连续写入的数据
+ * 该函数由 I2C1_EV_IRQHandler() 在检测到 STOP 标志时调用。
+ * STOP 表示上位机已经结束本次 I2C 写入，因此此时 i2c_rx_buf[]
+ * 中保存的是一帧完整命令。
  *
- * 如果写入地址超过 reg_map[] 范围，超出的数据直接舍弃。
+ * 当前协议格式：
+ *   i2c_rx_buf[0] = 起始寄存器地址 start_reg
+ *   i2c_rx_buf[1] = 写入 start_reg 的数据
+ *   i2c_rx_buf[2] = 写入 start_reg + 1 的数据
+ *   i2c_rx_buf[3] = 写入 start_reg + 2 的数据
+ *   ...
+ *
+ * 示例：
+ *   上位机发送：
+ *      i2ctransfer -y 7 w4@0x08 0x01 0x01 0x0E 0x06
+ *
+ *   STM32 收到：
+ *      i2c_rx_buf[0] = 0x01
+ *      i2c_rx_buf[1] = 0x01
+ *      i2c_rx_buf[2] = 0x0E
+ *      i2c_rx_buf[3] = 0x06
+ *
+ *   解析结果：
+ *      reg_map[0x01] = 0x01
+ *      reg_map[0x02] = 0x0E
+ *      reg_map[0x03] = 0x06
+ *
+ *   最终：
+ *      motor_mode = MOTOR_MODE_OPENLOOP_PWM
+ *      target_pwm_us = 0x060E = 1550 us
+ *
+ * 安全处理：
+ *   如果 start_reg + 数据偏移 超过 REG_MAP_SIZE，
+ *   超出的数据不会写入 reg_map[]，只增加 debug_i2c_discard_count。
+ *
+ * 调试信息：
+ *   debug_i2c_rx_len 记录最近一帧的长度；
+ *   debug_i2c_frame_count 记录收到完整帧的次数；
+ *   debug_i2c_start_reg 记录最近一帧的起始寄存器地址。
  */
 void I2C_LL_StopDetected(void)
 {
@@ -459,6 +658,34 @@ void I2C_LL_StopDetected(void)
     i2c_rx_len = 0;
 }
 
+/*
+ * 用户主循环函数。
+ *
+ * main.c 的 while(1) 中会不断调用 User_Loop()。
+ * 本函数不直接阻塞等待，而是通过中断置位的标志位来决定是否执行控制更新。
+ *
+ * 当前主要使用 3 个标志：
+ *   speed_update_flag：I2C 写入寄存器后置位，目前主要作为“收到新控制命令”的提示
+ *   hall_update_flag：TIM3 霍尔输入捕获或超时后置位
+ *   pid_update_flag：TIM1 周期中断置位，表示到达一个控制刷新周期
+ *
+ * 控制逻辑：
+ *   每当 pid_update_flag 被 TIM1 置位后，根据 motor_mode 选择控制模式：
+ *
+ *   1. MOTOR_MODE_STOP：
+ *        强制输出 PWM_US_NEUTRAL，通常为 1500 us，用于停止电机。
+ *
+ *   2. MOTOR_MODE_OPENLOOP_PWM：
+ *        直接输出 target_pwm_us 对应的 PWM。
+ *        这是当前主要稳定使用的模式。
+ *
+ *   3. MOTOR_MODE_PID_RPM：
+ *        调用 pid_pwm_update(target_rpm)，根据 target_rpm 和 motor_rpm 做闭环控制。
+ *        当前该模式已接入，但仍需要继续调参验证。
+ *
+ *   4. default：
+ *        如果 motor_mode 出现非法值，强制切回停止模式，保证安全。
+ */
 void User_Loop(void)
 {
     if (speed_update_flag == 1) {
@@ -548,13 +775,18 @@ void TIM_PER_CHECK(void){
 
 
 /*
- * 将上位机输入的速度指令转换为目标 RPM。
+ * 将上位机输入的速度类指令转换为目标 RPM。
  *
- * 当前开环 PWM 测试模式下不使用。
- * 后续如果恢复 PID 闭环，可以在这里加入：
- *    线速度 -> 轮速 RPM
- *    油门百分比 -> 目标 RPM
- *    自定义速度单位 -> 目标 RPM
+ * 当前版本中，目标 RPM 主要通过软件寄存器：
+ *   REG_TARGET_RPM_L
+ *   REG_TARGET_RPM_H
+ * 写入，并在 Register_Map_Apply() 中组合成 target_rpm。
+ *
+ * 因此该函数目前不是主控制路径的一部分，只作为旧版接口保留。
+ * 后续如果需要支持更复杂的速度单位转换，可以在这里扩展，例如：
+ *   线速度 -> 轮速 RPM
+ *   油门百分比 -> 目标 RPM
+ *   自定义速度单位 -> 目标 RPM
  */
 float rpm_update(int16_t speed_setpoint){
 	return (float)speed_setpoint;
@@ -562,12 +794,20 @@ float rpm_update(int16_t speed_setpoint){
 
 
 /*
- * @brief 开环 PWM 更新函数，保留给早期调试方案。
- * @retval None
+ * 旧版开环 PWM 更新函数，当前主控制路径未调用。
  *
- * 当前 User_Loop() 没有调用这个函数。
- * 这个函数把输入值限制到 CCR 范围后直接写入 TIM2 CH2。
- * 注意这里的输入 rpm_setpoint 实际被当作 CCR 值使用，并不是真正的 RPM。
+ * 早期版本中，该函数直接把输入值当作 TIM2 CCR 值写入 PWM 输出。
+ * 当前版本已经改为：
+ *   上位机写 REG_PWM_US_L / REG_PWM_US_H
+ *      -> Register_Map_Apply() 得到 target_pwm_us
+ *      -> User_Loop() 中转换为 CCR
+ *      -> TIM2 CH2 输出 PWM
+ *
+ * 因此本函数主要保留用于参考或后续临时调试。
+ *
+ * 注意：
+ * 这里的参数名 rpm_setpoint 容易误导。
+ * 在该函数内部，它实际被当作 CCR 值使用，并不是真正的 RPM。
  */
 void openloop_pwm_update(float rpm_setpoint) // non_pid algo
 {
@@ -592,12 +832,25 @@ void openloop_pwm_update(float rpm_setpoint) // non_pid algo
 /*
  * PID 闭环 PWM 更新函数。
  *
- * 当前 User_Loop() 没有调用该函数。
- * 后续恢复闭环控制时，它的作用是：
- * 1. 用目标转速 rpm_setpoint 和实际转速 motor_rpm 计算误差；
- * 2. PID_Compute() 得到 PWM 脉宽修正量；
- * 3. 在中位脉宽 PWM_ZERO_PULSEWIDTH 基础上叠加修正量；
- * 4. 转换为 CCR 后写入 TIM2 CH2。
+ * 在 MOTOR_MODE_PID_RPM 模式下，User_Loop() 会调用本函数。
+ *
+ * 输入：
+ *   rpm_setpoint：目标转速 RPM
+ *
+ * 反馈：
+ *   motor_rpm：由 TIM3 霍尔输入捕获计算得到的实际转速
+ *
+ * 控制过程：
+ *   1. PID_Compute() 根据目标转速和实际转速计算 motor_pid.output；
+ *   2. motor_pid.output 表示相对于中位 PWM 脉宽的修正量；
+ *   3. 在 PWM_ZERO_PULSEWIDTH 基础上叠加 PID 输出；
+ *   4. 将脉宽转换为 TIM2 CCR；
+ *   5. 写入 TIM2 CH2 输出给 ESC。
+ *
+ * 当前限制：
+ *   该函数目前只考虑正向输出。
+ *   如果 PID 计算结果低于中位 PWM，则会被限制到 PWM_CCR_DEFAULT。
+ *   后续如果需要反转，需要重新设计正转 / 停止 / 反转状态机。
  */
 void pid_pwm_update(float rpm_setpoint) {
 
@@ -661,10 +914,19 @@ uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint)
 
 /* Interrupt Functions */
 /*
- * 定时器溢出中断回调。
+ * 定时器周期中断回调函数。
  *
- * TIM1：作为控制周期定时器。当前版本中用于周期性刷新 PWM 输出。
- * TIM3：作为霍尔测速定时器。若发生溢出且没有新的输入捕获，认为霍尔超时，转速置 0。
+ * 该函数由 HAL_TIM_IRQHandler() 间接调用。
+ *
+ * TIM1：
+ *   作为控制循环定时器。
+ *   每次 TIM1 周期到达时，置位 pid_update_flag。
+ *   User_Loop() 检测到该标志后，根据 motor_mode 刷新 PWM 或执行 PID。
+ *
+ * TIM3：
+ *   用于霍尔测速超时判断。
+ *   如果 TIM3 发生溢出，但在此之前没有新的霍尔输入捕获，
+ *   说明较长时间内没有检测到霍尔边沿，可以认为电机转速为 0。
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
@@ -685,11 +947,20 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 
 /*
- * TIM3 输入捕获回调：用于霍尔测速。
+ * TIM 输入捕获回调函数，用于霍尔传感器测速。
  *
- * 每检测到一个霍尔边沿，TIM3 捕获当前计数值。
- * hall_capture_value 表示相邻霍尔边沿之间的计数间隔。
- * HALL_CAPTURE_TO_RPM() 根据该计数间隔换算电机转速 RPM。
+ * 当 TIM3 捕获到霍尔传感器边沿时，HAL 会调用本函数。
+ *
+ * hall_capture_value：
+ *   保存相邻霍尔边沿之间的定时器计数值。
+ *
+ * motor_rpm：
+ *   根据 hall_capture_value 和 HALL_CAPTURE_TO_RPM() 宏换算得到。
+ *
+ * 注意：
+ *   电机刚从停止进入转动时，第一次捕获值可能异常。
+ *   当前代码在 motor_rpm 为 0 时，先赋值 MIN_MOTOR_RPM，
+ *   避免第一次捕获直接产生异常 RPM。
  */
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
