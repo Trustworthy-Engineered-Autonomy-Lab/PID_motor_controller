@@ -34,7 +34,7 @@
 #define TIM2_PER_MS	(1.0f / CLK_FREQ * (TIM2_PSC + 1) * (TIM2_CTR_PER + 1) * 1000) // 20 ms
 #define TIM3_PER_MS	(1.0f / CLK_FREQ * (TIM3_PSC + 1) * (TIM3_CTR_PER + 1) * 1000) // 200 ms
 
-#define EXPECTED_TIM1_PER_MS	15 // For PID Update Frequency of 60Hz
+#define EXPECTED_TIM1_PER_MS	10 // For PID Update Frequency of 60Hz
 #define EXPECTED_TIM2_PER_MS	20 // For PWM Frequency of 50Hz (Standard for ESCs)
 #define EXPECTED_TIM3_PER_MS	200 // Detects a minimum RPM of 50
 

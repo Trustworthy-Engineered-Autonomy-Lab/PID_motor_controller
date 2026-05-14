@@ -307,7 +307,23 @@ volatile float motor_rpm = 0;
  *   0.2f：折中，建议先用这个
  *   0.3f：响应更快
  */
-#define RPM_FILTER_ALPHA 0.2f
+
+/*
+ * 最新一次霍尔捕获得到的原始 RPM。
+ *
+ * 霍尔中断只更新这个变量；
+ * 滤波器在 TIM1 控制周期中运行，
+ * 使滤波采样周期与 PID 采样周期一致。
+ */
+volatile float latest_raw_rpm = 0.0f;
+
+/*
+ * 调试用：观察滤波器是否按 TIM1 周期运行。
+ * TIM1 = 10 ms 时，该变量每秒应增加约 100。
+ */
+volatile uint32_t debug_filter_update_count = 0;
+
+#define RPM_FILTER_ALPHA 0.05f
 
 /*
  * 霍尔捕获异常跳变调试变量。
@@ -847,6 +863,18 @@ void User_Loop(void)
     if (pid_update_flag == 1) {
         pid_update_flag = 0;
 
+        /*
+         * TIM1 固定周期执行滤波。
+         *
+         * 现在 TIM1 周期已经改为 10 ms，
+         * 所以滤波器采样频率 = PID 采样频率 = 100 Hz。
+         *
+         * latest_raw_rpm 来自霍尔捕获中断；
+         * motor_rpm 会在这里更新为滤波后的 RPM。
+         */
+        RPM_Filter_Update(latest_raw_rpm);
+        debug_filter_update_count++;
+
         switch (motor_mode)
         {
             case MOTOR_MODE_STOP:
@@ -1113,9 +1141,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
              *
              * 原始 RPM、滤波 RPM、兼容变量 motor_rpm 全部清零。
              */
-            motor_rpm_raw = 0.0f;
-            motor_rpm_filtered = 0.0f;
-            motor_rpm = 0.0f;
+        	latest_raw_rpm = 0.0f;
+        	motor_rpm_raw = 0.0f;
+        	motor_rpm_filtered = 0.0f;
+        	motor_rpm = 0.0f;
 
             hall_update_flag = 1;
         }
@@ -1157,22 +1186,26 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
          */
         Hall_Capture_Spike_Check(hall_capture_value);
 
-        /*
-         * 根据捕获值计算原始瞬时 RPM。
-         *
-         * 如果之前滤波后的 RPM 已经大于 0，说明电机已经处于有效测速状态，
-         * 可以正常用 HALL_CAPTURE_TO_RPM() 换算。
-         *
-         * 如果之前为 0，说明电机刚从停止进入转动，第一次捕获可能不稳定。
-         * 当前先使用 MIN_MOTOR_RPM 作为初始值，再由后续捕获逐步更新。
-         */
-        if (motor_rpm_filtered > 0.0f) {
-            RPM_Filter_Update(HALL_CAPTURE_TO_RPM(hall_capture_value));
+        float raw_rpm_now;
+
+        if (motor_rpm_raw > 0.0f || motor_rpm_filtered > 0.0f) {
+            raw_rpm_now = HALL_CAPTURE_TO_RPM(hall_capture_value);
         }
         else
         {
-            RPM_Filter_Update(MIN_MOTOR_RPM);
+            /*
+             * 电机刚从停止进入转动时，第一次捕获可能异常。
+             * 保留原来的 MIN_MOTOR_RPM 保护逻辑。
+             */
+            raw_rpm_now = MIN_MOTOR_RPM;
         }
+
+        /*
+         * 霍尔中断只保存最新原始 RPM，不在这里执行滤波。
+         */
+        latest_raw_rpm = raw_rpm_now;
+        motor_rpm_raw = raw_rpm_now;
+        lastHallSensorUpdate = HAL_GetTick();
     }
 }
 /* End Interrupt Functions */
