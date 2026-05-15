@@ -204,9 +204,21 @@ volatile int16_t speed_setpoint = 0;
 /*
  * 控制模式定义
  */
-#define MOTOR_MODE_STOP          0
-#define MOTOR_MODE_OPENLOOP_PWM  1
-#define MOTOR_MODE_PID_RPM       2
+#define MOTOR_MODE_OPENLOOP_PWM       0
+#define MOTOR_MODE_PID_ACTIVE_BRAKE    1
+#define MOTOR_MODE_PID_RPM            2
+
+/*
+ * Active brake settings.
+ *
+ * 注意：
+ * MOTOR_BRAKE_PWM_US 必须根据 ESC 说明确认。
+ * 如果 ESC 把 1500 us 以下解释为反转，而不是刹车，
+ * 这个值会产生反向扭矩，需要非常小心。
+ */
+#define MOTOR_BRAKE_PWM_US       1480
+#define MOTOR_BRAKE_ON_RPM       80.0f
+#define MOTOR_BRAKE_OFF_RPM      30.0f
 
 /*
  * I2C 接收缓冲区：
@@ -228,12 +240,12 @@ volatile uint8_t reg_map[REG_MAP_SIZE] = {0};
 /*
  * 当前电机控制模式。
  */
-volatile uint8_t motor_mode = MOTOR_MODE_STOP;
+volatile uint8_t motor_mode = MOTOR_MODE_OPENLOOP_PWM;
 
 /*
  * 给 STM32CubeMonitor 观察用的模式显示变量。
- * 1000 = 停止模式
- * 2000 = 开环 PWM 模式
+ * 1000 = 开环 PWM 模式
+ * 2000 = PID ACTIVE BRAKE 模式
  * 3000 = PID RPM 模式
  * 9999 = 异常模式
  */
@@ -357,8 +369,8 @@ PID_t motor_pid;
 
 /* PID 参数：当前保留，供后续闭环转速控制使用。 */
 const float dt = TIM1_PER_MS / 1000; 							// PID 更新周期，单位 s
-const float Kp = 0.00001; 										// 比例系数
-const float Ki = 0.000005; 										// 积分系数
+const float Kp = 0.00002; 										// 比例系数
+const float Ki = 0.00003; 										// 积分系数
 const float Kd = 0; 											// 微分系数
 const float Integral_max = 100000.0f; 							// 积分限幅，防止积分饱和
 const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;	// PID 输出最大脉宽修正量
@@ -437,6 +449,8 @@ void User_Init(void)
 {
     TIM_PER_CHECK();
 
+    PID_Init(&motor_pid, Kp, Ki, Kd, Integral_max, pid_max);
+
     Register_Map_Init();
 
     LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_ACK);
@@ -451,8 +465,6 @@ void User_Init(void)
     HAL_TIMEx_HallSensor_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim1);
-
-    PID_Init(&motor_pid, Kp, Ki, Kd, Integral_max, pid_max);
 }
 
 /*
@@ -477,7 +489,7 @@ void Register_Map_Init(void)
         reg_map[i] = 0;
     }
 
-    reg_map[REG_MODE] = MOTOR_MODE_STOP;
+    reg_map[REG_MODE] = MOTOR_MODE_OPENLOOP_PWM;
 
     reg_map[REG_PWM_US_L] = (uint8_t)(PWM_US_NEUTRAL & 0xFF);
     reg_map[REG_PWM_US_H] = (uint8_t)((PWM_US_NEUTRAL >> 8) & 0xFF);
@@ -495,11 +507,11 @@ void Update_Debug_Motor_Mode_View(void)
 {
     switch (motor_mode)
     {
-        case MOTOR_MODE_STOP:
+        case MOTOR_MODE_OPENLOOP_PWM:
             debug_motor_mode_view = 1000;
             break;
 
-        case MOTOR_MODE_OPENLOOP_PWM:
+        case MOTOR_MODE_PID_ACTIVE_BRAKE:
             debug_motor_mode_view = 2000;
             break;
 
@@ -560,16 +572,22 @@ void Register_Map_Apply(void)
 	uint8_t old_mode = motor_mode;
 	uint8_t mode = reg_map[REG_MODE];
 
-	if (mode == MOTOR_MODE_STOP ||
-	    mode == MOTOR_MODE_OPENLOOP_PWM ||
+	if (mode == MOTOR_MODE_OPENLOOP_PWM ||
+	    mode == MOTOR_MODE_PID_ACTIVE_BRAKE ||
 	    mode == MOTOR_MODE_PID_RPM)
 	{
 	    motor_mode = mode;
 	}
 	else
 	{
-	    motor_mode = MOTOR_MODE_STOP;
-	    reg_map[REG_MODE] = MOTOR_MODE_STOP;
+	    /*
+	     * 非法模式值回退到开环 PWM 模式，并使用 1500 us 中位 PWM。
+	     */
+	    motor_mode = MOTOR_MODE_OPENLOOP_PWM;
+	    reg_map[REG_MODE] = MOTOR_MODE_OPENLOOP_PWM;
+
+	    reg_map[REG_PWM_US_L] = (uint8_t)(PWM_US_NEUTRAL & 0xFF);
+	    reg_map[REG_PWM_US_H] = (uint8_t)((PWM_US_NEUTRAL >> 8) & 0xFF);
 	}
 
 	/*
@@ -577,9 +595,10 @@ void Register_Map_Apply(void)
 	 * This avoids carrying integral memory across modes.
 	 */
 	if (old_mode != motor_mode) {
-	    if (old_mode == MOTOR_MODE_PID_RPM ||
-	        motor_mode == MOTOR_MODE_PID_RPM ||
-	        motor_mode == MOTOR_MODE_STOP)
+	    if (old_mode == MOTOR_MODE_PID_ACTIVE_BRAKE ||
+	        old_mode == MOTOR_MODE_PID_RPM ||
+	        motor_mode == MOTOR_MODE_PID_ACTIVE_BRAKE ||
+	        motor_mode == MOTOR_MODE_PID_RPM)
 	    {
 	        PID_Reset(&motor_pid);
 	    }
@@ -877,18 +896,6 @@ void User_Loop(void)
 
         switch (motor_mode)
         {
-            case MOTOR_MODE_STOP:
-            {
-                int16_t pulse_us = PWM_US_NEUTRAL;
-                uint32_t pwm_ccr = PWM_US_TO_CCR(pulse_us);
-
-                debug_pwm_us = pulse_us;
-                debug_pwm_ccr = pwm_ccr;
-
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_ccr);
-                break;
-            }
-
             case MOTOR_MODE_OPENLOOP_PWM:
             {
                 int16_t pulse_us = PWM_US_CLAMP(target_pwm_us);
@@ -901,6 +908,12 @@ void User_Loop(void)
                 break;
             }
 
+            case MOTOR_MODE_PID_ACTIVE_BRAKE:
+            {
+                pid_pwm_update((float)target_rpm);
+                break;
+            }
+
             case MOTOR_MODE_PID_RPM:
             {
                 pid_pwm_update((float)target_rpm);
@@ -909,7 +922,8 @@ void User_Loop(void)
 
             default:
             {
-                motor_mode = MOTOR_MODE_STOP;
+                motor_mode = MOTOR_MODE_OPENLOOP_PWM;
+                reg_map[REG_MODE] = MOTOR_MODE_OPENLOOP_PWM;
                 Update_Debug_Motor_Mode_View();
 
                 int16_t pulse_us = PWM_US_NEUTRAL;
@@ -1031,19 +1045,55 @@ void openloop_pwm_update(float rpm_setpoint) // non_pid algo
 void pid_pwm_update(float rpm_setpoint) {
 
 	if (rpm_setpoint <= 0.0f) {
-		PID_Reset(&motor_pid);
 
-		int16_t pulse_us = PWM_US_NEUTRAL;
-		uint32_t pwm_ccr = PWM_US_TO_CCR(pulse_us);
+	    PID_Reset(&motor_pid);
 
-		debug_pwm_us = pulse_us;
-		debug_pwm_ccr = pwm_ccr;
-		debug_motor_rpm = motor_rpm;
-		debug_pid_output = 0.0f;
-		debug_pid_error = 0.0f;
+	    float feedback_rpm = motor_rpm;
+	    int16_t pulse_us;
 
-		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_ccr);
-		return;
+	    /*
+	     * PID 主动刹车模式：
+	     * 速度高时主动刹车，速度低时回到 neutral。
+	     */
+	    if (motor_mode == MOTOR_MODE_PID_ACTIVE_BRAKE) {
+
+	        static uint8_t brake_active = 0;
+
+	        if (brake_active == 0) {
+	            if (feedback_rpm > MOTOR_BRAKE_ON_RPM) {
+	                brake_active = 1;
+	            }
+	        } else {
+	            if (feedback_rpm < MOTOR_BRAKE_OFF_RPM) {
+	                brake_active = 0;
+	            }
+	        }
+
+	        if (brake_active) {
+	            pulse_us = MOTOR_BRAKE_PWM_US;
+	        } else {
+	            pulse_us = PWM_US_NEUTRAL;
+	        }
+	    }
+
+	    /*
+	     * PID 自然停止模式：
+	     * 不主动刹车，直接输出 neutral，让电机自然滑停。
+	     */
+	    else {
+	        pulse_us = PWM_US_NEUTRAL;
+	    }
+
+	    uint32_t pwm_ccr = PWM_US_TO_CCR(pulse_us);
+
+	    debug_pwm_us = pulse_us;
+	    debug_pwm_ccr = pwm_ccr;
+	    debug_motor_rpm = feedback_rpm;
+	    debug_pid_output = 0.0f;
+	    debug_pid_error = 0.0f;
+
+	    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_ccr);
+	    return;
 	}
 
 	/* 计算 PID 输出。motor_pid.output 表示相对于中位脉宽的修正量。 */
