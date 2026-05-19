@@ -1,7 +1,7 @@
 #include "motor_control.h"
-#include "user.h"
+#include "app_config.h"
+#include "reg.h"
 #include "pid.h"
-#include "register_map.h"
 #include "rpm_filter.h"
 #include "pwm_output.h"
 
@@ -18,6 +18,11 @@ PID_t motor_pid;
 volatile float debug_motor_rpm = 0.0f;
 volatile float debug_pid_output = 0.0f;
 volatile float debug_pid_error = 0.0f;
+
+volatile uint8_t motor_mode = MOTOR_MODE_OPENLOOP_PWM;
+volatile int16_t target_pwm_us = PWM_US_NEUTRAL;
+volatile int16_t target_rpm = 0;
+volatile int16_t speed_setpoint = PWM_US_NEUTRAL;
 
 /*
  * PID 闭环模式下的目标转速。
@@ -42,6 +47,11 @@ const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;
  */
 void Motor_Control_Init(void)
 {
+    motor_mode = MOTOR_MODE_OPENLOOP_PWM;
+    target_pwm_us = PWM_US_NEUTRAL;
+    target_rpm = 0;
+    speed_setpoint = PWM_US_NEUTRAL;
+
     PID_Init(&motor_pid, Kp, Ki, Kd, Integral_max, pid_max);
 }
 
@@ -56,6 +66,53 @@ void Motor_Control_Reset_PID(void)
     PID_Reset(&motor_pid);
 }
 
+static void Motor_Control_Read_Registers(void)
+{
+    uint8_t mode = MOTOR_MODE_OPENLOOP_PWM;
+    uint8_t buf[2] = {0};
+
+    if (read_reg(REG_MODE, &mode, 1) == 1)
+    {
+        if (mode == MOTOR_MODE_OPENLOOP_PWM ||
+            mode == MOTOR_MODE_PID_ACTIVE_BRAKE ||
+            mode == MOTOR_MODE_PID_RPM)
+        {
+            motor_mode = mode;
+        }
+        else
+        {
+            motor_mode = MOTOR_MODE_OPENLOOP_PWM;
+        }
+    }
+
+    if (read_reg(REG_PWM_US_L, buf, 2) == 2)
+    {
+        int16_t pwm = (int16_t)(
+            ((uint16_t)buf[1] << 8) |
+            ((uint16_t)buf[0])
+        );
+
+        target_pwm_us = PWM_US_CLAMP(pwm);
+    }
+
+    if (read_reg(REG_TARGET_RPM_L, buf, 2) == 2)
+    {
+        target_rpm = (int16_t)(
+            ((uint16_t)buf[1] << 8) |
+            ((uint16_t)buf[0])
+        );
+    }
+
+    if (motor_mode == MOTOR_MODE_OPENLOOP_PWM)
+    {
+        speed_setpoint = target_pwm_us;
+    }
+    else
+    {
+        speed_setpoint = target_rpm;
+    }
+}
+
 /*
  * 电机控制周期更新函数。
  *
@@ -63,6 +120,8 @@ void Motor_Control_Reset_PID(void)
  */
 void Motor_Control_Update(void)
 {
+    Motor_Control_Read_Registers();
+
     switch (motor_mode)
     {
         case MOTOR_MODE_OPENLOOP_PWM:
@@ -86,11 +145,8 @@ void Motor_Control_Update(void)
         default:
         {
             motor_mode = MOTOR_MODE_OPENLOOP_PWM;
-            reg_map[REG_MODE] = MOTOR_MODE_OPENLOOP_PWM;
-            Update_Debug_Motor_Mode_View();
-
+            target_pwm_us = PWM_US_NEUTRAL;
             PWM_Output_Set_US(PWM_US_NEUTRAL);
-
             break;
         }
     }

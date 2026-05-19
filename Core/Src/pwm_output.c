@@ -1,5 +1,5 @@
 #include "pwm_output.h"
-#include "user.h"
+#include "app_config.h"
 
 /*
  * htim2 由 CubeMX 在 tim.c / main.c 中生成。
@@ -13,8 +13,8 @@ extern TIM_HandleTypeDef htim2;
  *
  * 后续如果继续分装，可以再统一移动到 debug_vars.c。
  */
-extern volatile int16_t debug_pwm_us;
-extern volatile uint32_t debug_pwm_ccr;
+volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;
+volatile uint32_t debug_pwm_ccr = 0;
 
 /*
  * 将 PWM 脉宽 us 转换为 TIM2 CCR。
@@ -33,12 +33,12 @@ void PWM_Output_Set_US(int16_t pulse_us)
 {
     pulse_us = PWM_US_CLAMP(pulse_us);
 
-    uint32_t pwm_ccr = PWM_Output_UsToCcr(pulse_us);
+    uint32_t ccr = PWM_US_TO_CCR(pulse_us);
+
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr);
 
     debug_pwm_us = pulse_us;
-    debug_pwm_ccr = pwm_ccr;
-
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_ccr);
+    debug_pwm_ccr = ccr;
 }
 
 

@@ -8,6 +8,11 @@ extern "C" {
 #include "main.h"
 #include <stdint.h>
 
+/* 电机模式定义 */
+#define MOTOR_MODE_OPENLOOP_PWM       0
+#define MOTOR_MODE_PID_ACTIVE_BRAKE   1
+#define MOTOR_MODE_PID_RPM            2
+
 /*
  * PID 调试变量。
  */

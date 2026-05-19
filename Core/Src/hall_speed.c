@@ -1,5 +1,5 @@
 #include "hall_speed.h"
-#include "user.h"
+#include "app_config.h"
 #include "rpm_filter.h"
 
 /*

@@ -1,12 +1,13 @@
 
 /* Includes */
 #include "user.h"
+#include "app_config.h"
 #include "pwm_output.h"
 #include "rpm_filter.h"
-#include "register_map.h"
-#include "i2c_register_slave.h"
+#include "reg.h"
 #include "hall_speed.h"
 #include "motor_control.h"
+#include <math.h>
 /* End Includes */
 
 
@@ -27,9 +28,6 @@ volatile uint8_t pid_update_flag = 0;	// TIM1 周期触发；当前版本用作 
 volatile uint8_t speed_update_flag = 0;	// I2C 收到新指令后置 1
 volatile uint8_t hall_update_flag = 0;	// 霍尔输入捕获或 TIM3 溢出后置 1
 
-/* 调试变量：方便用 STM32CubeMonitor / 调试器观察当前输出。 */
-volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;	// 当前实际输出的 PWM 脉宽，单位 us
-volatile uint32_t debug_pwm_ccr = 0;			// 当前实际写入 TIM2 CCR 的值
 
 /* End Variable Definitions */
 
@@ -47,22 +45,17 @@ void User_Init(void)
 {
     TIM_PER_CHECK();
 
-    Register_Map_Init();
-
-    LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_ACK);
-    LL_I2C_EnableIT_EVT(I2C1);
-    LL_I2C_EnableIT_BUF(I2C1);
-    LL_I2C_EnableIT_ERR(I2C1);
-    LL_I2C_Enable(I2C1);
+    reg_init();
 
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
     PWM_Output_Set_US(PWM_US_NEUTRAL);
 
     HAL_TIMEx_HallSensor_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim3);
-    HAL_TIM_Base_Start_IT(&htim1);
 
     Motor_Control_Init();
+
+    HAL_TIM_Base_Start_IT(&htim1);
 }
 
 void User_Loop(void)
