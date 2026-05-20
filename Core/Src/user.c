@@ -1,11 +1,11 @@
 
 /* Includes */
+#include <hall_sensor.h>
+#include <lp_filter.h>
 #include "user.h"
 #include "app_config.h"
 #include "pwm_output.h"
-#include "rpm_filter.h"
 #include "reg.h"
-#include "hall_speed.h"
 #include "motor_control.h"
 #include <math.h>
 /* End Includes */
@@ -28,6 +28,7 @@ volatile uint8_t pid_update_flag = 0;	// TIM1 周期触发；当前版本用作 
 volatile uint8_t speed_update_flag = 0;	// I2C 收到新指令后置 1
 volatile uint8_t hall_update_flag = 0;	// 霍尔输入捕获或 TIM3 溢出后置 1
 
+static LP_Filter_t rpm_lp_filter;
 
 /* End Variable Definitions */
 
@@ -46,6 +47,8 @@ void User_Init(void)
     TIM_PER_CHECK();
 
     reg_init();
+
+    lp_filter_init(&rpm_lp_filter, 0.05f);
 
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
     PWM_Output_Set_US(PWM_US_NEUTRAL);
@@ -71,7 +74,12 @@ void User_Loop(void)
     if (pid_update_flag == 1) {
         pid_update_flag = 0;
 
-        RPM_Filter_Update(latest_raw_rpm);
+        lp_filter_compute(&rpm_lp_filter, latest_raw_rpm);
+
+        motor_rpm_raw = rpm_lp_filter.input;
+        motor_rpm_filtered = rpm_lp_filter.output;
+        motor_rpm = rpm_lp_filter.output;
+
         debug_filter_update_count++;
 
         Motor_Control_Update();

@@ -1,6 +1,6 @@
-#include "hall_speed.h"
+#include <hall_sensor.h>
+#include <lp_filter.h>
 #include "app_config.h"
-#include "rpm_filter.h"
 
 /*
  * hall_update_flag 目前仍然定义在 user.c。

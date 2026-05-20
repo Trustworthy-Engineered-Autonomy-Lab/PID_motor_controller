@@ -1,12 +1,12 @@
 #ifndef RPM_FILTER_H
 #define RPM_FILTER_H
 
+#include "app_config.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "main.h"
-#include <stdint.h>
 
 /*
  * RPM 一阶低通滤波系数。
@@ -16,7 +16,16 @@ extern "C" {
  *
  * 当前建议值：0.05f
  */
-#define RPM_FILTER_ALPHA 0.05f
+/*#define RPM_FILTER_ALPHA 0.05f*/
+
+typedef struct
+{
+    float alpha;
+    float input;
+    float output;
+    unsigned char initialized;
+
+} LP_Filter_t;
 
 /*
  * 霍尔测速得到的原始瞬时 RPM。
@@ -52,7 +61,14 @@ extern volatile uint32_t debug_filter_update_count;
 /*
  * RPM 一阶低通滤波更新函数。
  */
-void RPM_Filter_Update(float raw_rpm);
+
+/*void RPM_Filter_Update(float raw_rpm);*/
+
+void lp_filter_init(LP_Filter_t *filter,
+                    float alpha);
+
+void lp_filter_compute(LP_Filter_t *filter,
+                       float input);
 
 #ifdef __cplusplus
 }
