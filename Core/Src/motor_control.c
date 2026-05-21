@@ -1,11 +1,8 @@
-#include <lp_filter.h>
 #include "motor_control.h"
 #include "app_config.h"
 #include "reg.h"
 #include "pid.h"
-#include "rpm_filter.h"
-
-extern TIM_HandleTypeDef htim2;
+#include "lp_filter.h"
 
 /* PWM */
 volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;
@@ -23,7 +20,7 @@ void Motor_Control_Set_PWM_US(int16_t pulse_us)
 
     uint32_t ccr = PWM_US_TO_CCR(pulse_us);
 
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr);
+    __HAL_TIM_SET_COMPARE(&MOTOR_PWM_TIMER_HANDLE, MOTOR_PWM_CHANNEL, ccr);
 
     debug_pwm_us = pulse_us;
     debug_pwm_ccr = ccr;
@@ -152,13 +149,13 @@ static void Motor_Control_Read_Registers(void)
             ((uint16_t)buf[0])
         );
 
-        if (pwm == 0)
+        if (pwm < PWM_US_MIN || pwm > PWM_US_MAX)
         {
             target_pwm_us = PWM_US_NEUTRAL;
         }
         else
         {
-            target_pwm_us = PWM_US_CLAMP(pwm);
+            target_pwm_us = pwm;
         }
     }
 

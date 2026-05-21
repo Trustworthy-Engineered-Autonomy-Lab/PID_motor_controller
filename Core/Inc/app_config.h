@@ -66,6 +66,19 @@
 /* Hall 测速 */
 #define HALL_EDGES_PER_REV 12.0f
 
+/* RPM low-pass filter */
+#define RPM_FILTER_ALPHA 0.05f
+
+/*
+ * Motor PWM uses TIM2 Channel 2.
+ * The actual TIM handle is defined in main.c.
+ * motor_control.c must declare:
+ * extern TIM_HandleTypeDef htim2;
+ */
+#define MOTOR_PWM_TIMER_HANDLE htim2
+#define MOTOR_PWM_CHANNEL      TIM_CHANNEL_2
+extern TIM_HandleTypeDef htim2;
+
 #define HALL_CAPTURE_TO_RPM(capture_value) \
     ((CLK_FREQ * 60.0f) / ((float)(capture_value) * (TIM3_PSC + 1) * HALL_EDGES_PER_REV))
 

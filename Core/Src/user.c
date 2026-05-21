@@ -4,7 +4,7 @@
 #include <lp_filter.h>
 #include "user.h"
 #include "app_config.h"
-#include "rpm_filter.h"
+#include "lp_filter.h"
 #include "reg.h"
 #include "motor_control.h"
 #include <math.h>
@@ -44,17 +44,19 @@ void User_Error_Handler(uint8_t count);
 
 void User_Init(void)
 {
-	reg_init();
+    reg_init();
 
-	Motor_Control_Init();
+    lp_filter_init(&rpm_lp_filter, RPM_FILTER_ALPHA);
 
-	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-	Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
+    Motor_Control_Init();
 
-	HAL_TIMEx_HallSensor_Start_IT(&htim3);
-	HAL_TIM_Base_Start_IT(&htim3);
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+    Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
 
-	HAL_TIM_Base_Start_IT(&htim1);
+    HAL_TIMEx_HallSensor_Start_IT(&htim3);
+    HAL_TIM_Base_Start_IT(&htim3);
+
+    HAL_TIM_Base_Start_IT(&htim1);
 }
 
 void User_Loop(void)
