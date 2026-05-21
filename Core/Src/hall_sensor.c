@@ -14,6 +14,7 @@ extern volatile uint8_t hall_update_flag;
  */
 volatile uint32_t hall_capture_value = 0;
 
+
 /*
  * 记录上一次霍尔传感器更新时间。
  */
@@ -34,7 +35,7 @@ volatile uint32_t debug_hall_capture_spike_count = 0;
  * 如果 hall_capture_value 相比上一帧突然变得过大或过小，
  * 说明可能存在霍尔边沿干扰、漏捕获、低速不均匀或机械周期性波动。
  */
-void Hall_Capture_Spike_Check(uint32_t capture_value)
+void hall_capture_spike_check(uint32_t capture_value)
 {
     if (debug_hall_capture_prev > 0)
     {
@@ -67,7 +68,7 @@ void Hall_Capture_Spike_Check(uint32_t capture_value)
  *
  * 当 TIM3 捕获到霍尔传感器边沿时调用。
  */
-void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim)
+void hall_sensor_capture_handler(uint32_t capture_value)
 {
     hall_update_flag = 1;
 
@@ -75,13 +76,13 @@ void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim)
      * 读取 TIM3 CCR1，获得本次霍尔边沿对应的捕获值。
      * hall_capture_value 表示相邻霍尔边沿之间的定时器计数。
      */
-    hall_capture_value = htim->Instance->CCR1;
+    hall_capture_value = capture_value;
 
     /*
      * 检查 hall_capture_value 是否出现明显异常跳变。
      * 该检查只用于 CubeMonitor 调试观察，不参与控制。
      */
-    Hall_Capture_Spike_Check(hall_capture_value);
+    hall_capture_spike_check(hall_capture_value);
 
     float raw_rpm_now;
 
@@ -104,7 +105,6 @@ void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim)
      */
     latest_raw_rpm = raw_rpm_now;
     motor_rpm_raw = raw_rpm_now;
-    lastHallSensorUpdate = HAL_GetTick();
 }
 
 /*
@@ -113,7 +113,7 @@ void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim)
  * 如果 TIM3 溢出时 hall_update_flag == 0，
  * 说明较长时间没有检测到霍尔边沿，可以认为电机停止。
  */
-void Hall_Speed_Timeout_Handler(void)
+void hall_sensor_timeout_handler(void)
 {
     if (hall_update_flag == 0)
     {

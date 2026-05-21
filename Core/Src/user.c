@@ -1,5 +1,6 @@
 
 /* Includes */
+#include "main.h"
 #include <hall_sensor.h>
 #include <lp_filter.h>
 #include "user.h"
@@ -116,7 +117,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 
     if (htim->Instance == TIM3) {
-        Hall_Speed_Timeout_Handler();
+        hall_sensor_timeout_handler();
     }
 
 }
@@ -124,7 +125,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM3) {
-        Hall_Speed_Capture_Handler(htim);
+        uint32_t capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
+        hall_sensor_capture_handler(capture_value);
     }
 }
 /* End Interrupt Functions */

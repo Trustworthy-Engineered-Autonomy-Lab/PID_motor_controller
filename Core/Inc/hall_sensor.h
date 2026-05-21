@@ -5,7 +5,6 @@
 extern "C" {
 #endif
 
-#include "main.h"
 #include <stdint.h>
 
 /*
@@ -29,21 +28,22 @@ extern volatile uint32_t debug_hall_capture_spike_count;
 /*
  * 霍尔捕获值异常跳变检查。
  */
-void Hall_Capture_Spike_Check(uint32_t capture_value);
+void hall_capture_spike_check(uint32_t capture_value);
 
 /*
  * TIM3 输入捕获测速处理函数。
  *
  * 在 HAL_TIM_IC_CaptureCallback() 中调用。
  */
-void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim);
+/*void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim);*/
+void hall_sensor_capture_handler(uint32_t capture_value);
 
 /*
  * TIM3 溢出超时处理函数。
  *
  * 在 HAL_TIM_PeriodElapsedCallback() 的 TIM3 分支中调用。
  */
-void Hall_Speed_Timeout_Handler(void);
+void hall_sensor_timeout_handler(void);
 
 #ifdef __cplusplus
 }
