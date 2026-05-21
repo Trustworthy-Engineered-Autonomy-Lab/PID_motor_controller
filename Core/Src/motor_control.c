@@ -1,3 +1,4 @@
+#include <lp_filter.h>
 #include "motor_control.h"
 #include "app_config.h"
 #include "reg.h"
@@ -44,6 +45,44 @@ volatile uint8_t motor_mode = MOTOR_MODE_OPENLOOP_PWM;
 volatile int16_t target_pwm_us = PWM_US_NEUTRAL;
 volatile int16_t target_rpm = 0;
 volatile int16_t speed_setpoint = PWM_US_NEUTRAL;
+
+/*
+ * 霍尔测速得到的原始瞬时 RPM。
+ *
+ * 每次 TIM3 输入捕获时，根据单次霍尔边沿间隔计算。
+ * 该值响应最快，但低速时容易波动。
+ */
+volatile float motor_rpm_raw = 0.0f;
+
+/*
+ * 滤波后的 RPM。
+ *
+ * 该值由 motor_rpm_raw 经过一阶低通滤波得到，
+ * 更适合在 STM32CubeMonitor 中观察，也更适合作为 PID 反馈值。
+ */
+volatile float motor_rpm_filtered = 0.0f;
+
+/*
+ * 兼容旧变量名。
+ *
+ * 当前 motor_rpm 同步为 motor_rpm_filtered。
+ */
+volatile float motor_rpm = 0.0f;
+
+/*
+ * 最新一次霍尔捕获得到的原始 RPM。
+ *
+ * 霍尔中断只更新这个变量；
+ * 滤波器在 TIM1 控制周期中运行，
+ * 使滤波采样周期与 PID 采样周期一致。
+ */
+volatile float latest_raw_rpm = 0.0f;
+
+/*
+ * 调试用：观察滤波器是否按 TIM1 周期运行。
+ * 如果 TIM1 = 10 ms，该变量每秒应增加约 100。
+ */
+volatile uint32_t debug_filter_update_count = 0;
 
 /*
  * PID 闭环模式下的目标转速。

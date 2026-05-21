@@ -73,3 +73,4 @@
     HALL_CAPTURE_TO_RPM(TIM3_CTR_PER)
 
 #endif /* INC_APP_CONFIG_H_ */
+
