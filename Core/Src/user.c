@@ -2,7 +2,6 @@
 /* Includes */
 #include "user.h"
 #include "app_config.h"
-#include "pwm_output.h"
 #include "rpm_filter.h"
 #include "reg.h"
 #include "hall_speed.h"
@@ -43,19 +42,17 @@ void User_Error_Handler(uint8_t count);
 
 void User_Init(void)
 {
-    TIM_PER_CHECK();
+	reg_init();
 
-    reg_init();
+	Motor_Control_Init();
 
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-    PWM_Output_Set_US(PWM_US_NEUTRAL);
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+	Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
 
-    HAL_TIMEx_HallSensor_Start_IT(&htim3);
-    HAL_TIM_Base_Start_IT(&htim3);
+	HAL_TIMEx_HallSensor_Start_IT(&htim3);
+	HAL_TIM_Base_Start_IT(&htim3);
 
-    Motor_Control_Init();
-
-    HAL_TIM_Base_Start_IT(&htim1);
+	HAL_TIM_Base_Start_IT(&htim1);
 }
 
 void User_Loop(void)

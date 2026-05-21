@@ -3,9 +3,30 @@
 #include "reg.h"
 #include "pid.h"
 #include "rpm_filter.h"
-#include "pwm_output.h"
 
 extern TIM_HandleTypeDef htim2;
+
+/* PWM */
+volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;
+volatile uint32_t debug_pwm_ccr = 0;
+
+uint32_t Motor_Control_PWM_UsToCcr(int16_t pulse_us)
+{
+    pulse_us = PWM_US_CLAMP(pulse_us);
+    return PWM_US_TO_CCR(pulse_us);
+}
+
+void Motor_Control_Set_PWM_US(int16_t pulse_us)
+{
+    pulse_us = PWM_US_CLAMP(pulse_us);
+
+    uint32_t ccr = PWM_US_TO_CCR(pulse_us);
+
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr);
+
+    debug_pwm_us = pulse_us;
+    debug_pwm_ccr = ccr;
+}
 
 /*
  * 电机 PID 控制器实例。
@@ -92,7 +113,14 @@ static void Motor_Control_Read_Registers(void)
             ((uint16_t)buf[0])
         );
 
-        target_pwm_us = PWM_US_CLAMP(pwm);
+        if (pwm == 0)
+        {
+            target_pwm_us = PWM_US_NEUTRAL;
+        }
+        else
+        {
+            target_pwm_us = PWM_US_CLAMP(pwm);
+        }
     }
 
     if (read_reg(REG_TARGET_RPM_L, buf, 2) == 2)
@@ -126,7 +154,7 @@ void Motor_Control_Update(void)
     {
         case MOTOR_MODE_OPENLOOP_PWM:
         {
-            PWM_Output_Set_US(target_pwm_us);
+            Motor_Control_Set_PWM_US(target_pwm_us);
             break;
         }
 
@@ -146,51 +174,10 @@ void Motor_Control_Update(void)
         {
             motor_mode = MOTOR_MODE_OPENLOOP_PWM;
             target_pwm_us = PWM_US_NEUTRAL;
-            PWM_Output_Set_US(PWM_US_NEUTRAL);
+            Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
             break;
         }
     }
-}
-
-/*
- * 将上位机输入的速度类指令转换为目标 RPM。
- *
- * 当前版本中，目标 RPM 主要通过：
- *   REG_TARGET_RPM_L
- *   REG_TARGET_RPM_H
- * 写入，并在 Register_Map_Apply() 中组合成 target_rpm。
- *
- * 因此该函数目前不是主控制路径的一部分，只作为旧版接口保留。
- */
-float rpm_update(int16_t speed_setpoint)
-{
-    return (float)speed_setpoint;
-}
-
-/*
- * 旧版开环 PWM 更新函数，当前主控制路径未调用。
- *
- * 注意：
- *   这里的参数名 rpm_setpoint 容易误导。
- *   在该函数内部，它实际被当作 CCR 值使用，并不是真正的 RPM。
- */
-void openloop_pwm_update(float rpm_setpoint)
-{
-    uint32_t new_ccr_value;
-
-    if (rpm_setpoint < PWM_CCR_MIN) {
-        new_ccr_value = PWM_CCR_MIN;
-    } else if (rpm_setpoint > PWM_CCR_MAX) {
-        new_ccr_value = PWM_CCR_MAX;
-    } else {
-        new_ccr_value = (uint32_t)rpm_setpoint;
-    }
-
-    /*
-     * 旧函数保留原逻辑：直接写 TIM2 CCR。
-     * 当前推荐主路径使用 PWM_Output_Set_US()。
-     */
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, new_ccr_value);
 }
 
 /*
@@ -241,16 +228,12 @@ void pid_pwm_update(float rpm_setpoint_input)
 	        pulse_us = PWM_US_NEUTRAL;
 	    }
 
-	    uint32_t pwm_ccr = PWM_US_TO_CCR(pulse_us);
+	    Motor_Control_Set_PWM_US(pulse_us);
 
-	    debug_pwm_us = pulse_us;
-	    debug_pwm_ccr = pwm_ccr;
 	    debug_motor_rpm = feedback_rpm;
 	    debug_pid_output = 0.0f;
 	    debug_pid_error = 0.0f;
 
-	    extern TIM_HandleTypeDef htim2;
-	    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_ccr);
 	    return;
 	}
 
@@ -274,26 +257,5 @@ void pid_pwm_update(float rpm_setpoint_input)
 	    pulse_width = PWM_MAX_PULSEWIDTH;
 	}
 
-	uint32_t ccr_output = (uint32_t)PWM_PULSEWIDTH_TO_CCR(pulse_width);
-
-	/* 更新 PWM 输出。 */
-	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr_output);
-
-	debug_pwm_us = (int16_t)(pulse_width * 1000.0f);
-	debug_pwm_ccr = ccr_output;
-}
-
-/*
- * RPM 到 PWM CCR 的映射函数，当前未实现。
- *
- * 当前函数直接 return 0，不应在实际控制中调用。
- */
-uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint)
-{
-    /*
-     * 后续可以通过实验记录：
-     *   PWM 脉宽 / CCR 与实际 RPM 的对应关系，
-     * 再用线性拟合或查表方式实现该函数。
-     */
-    return 0;
+	Motor_Control_Set_PWM_US((int16_t)(pulse_width * 1000.0f));
 }

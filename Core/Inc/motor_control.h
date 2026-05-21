@@ -13,6 +13,13 @@ extern "C" {
 #define MOTOR_MODE_PID_ACTIVE_BRAKE   1
 #define MOTOR_MODE_PID_RPM            2
 
+/* PWM输出接口 */
+extern volatile int16_t debug_pwm_us;
+extern volatile uint32_t debug_pwm_ccr;
+
+uint32_t Motor_Control_PWM_UsToCcr(int16_t pulse_us);
+void Motor_Control_Set_PWM_US(int16_t pulse_us);
+
 /*
  * PID 调试变量。
  */
