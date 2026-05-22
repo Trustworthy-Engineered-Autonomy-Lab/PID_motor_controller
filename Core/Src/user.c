@@ -1,27 +1,16 @@
 
 /* Includes */
-#include "main.h"
-#include <hall_sensor.h>
-#include <lp_filter.h>
 #include "user.h"
 #include "app_config.h"
-#include "lp_filter.h"
 #include "reg.h"
 #include "motor_control.h"
+#include "lp_filter.h"
+#include "hall_sensor.h"
 #include <math.h>
 /* End Includes */
 
 
 /* Variable Declarations */
-
-/*
- * 外部外设句柄：
- * 这些变量由 CubeMX 在 main.c / tim.c / i2c.c 中生成，
- * user.c 通过 extern 引用它们，以便启动 PWM、I2C、定时器和霍尔测速。
- */
-extern TIM_HandleTypeDef htim1;
-extern TIM_HandleTypeDef htim2;
-extern TIM_HandleTypeDef htim3;
 
 /* 标志位：由中断置 1，由主循环清 0。 */
 volatile uint8_t pwm_update_flag = 0;	// 当前版本暂未使用，保留给后续 PWM 更新逻辑
@@ -51,13 +40,13 @@ void User_Init(void)
 
     Motor_Control_Init();
 
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Start(&MOTOR_PWM_TIMER_HANDLE, MOTOR_PWM_CHANNEL);
     Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
 
-    HAL_TIMEx_HallSensor_Start_IT(&htim3);
-    HAL_TIM_Base_Start_IT(&htim3);
+    HAL_TIMEx_HallSensor_Start_IT(&HALL_TIMER_HANDLE);
+    HAL_TIM_Base_Start_IT(&HALL_TIMER_HANDLE);
 
-    HAL_TIM_Base_Start_IT(&htim1);
+    HAL_TIM_Base_Start_IT(&CONTROL_TIMER_HANDLE);
 }
 
 void User_Loop(void)
@@ -112,20 +101,23 @@ void TIM_PER_CHECK(void){
 /* Interrupt Functions */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM1) {
+    if (htim->Instance == CONTROL_TIMER_HANDLE.Instance)
+    {
         pid_update_flag = 1;
     }
 
-    if (htim->Instance == TIM3) {
+    if (htim->Instance == HALL_TIMER_HANDLE.Instance)
+    {
         hall_sensor_timeout_handler();
     }
-
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM3) {
-        uint32_t capture_value = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
+    if (htim->Instance == HALL_TIMER_HANDLE.Instance)
+    {
+        uint32_t capture_value = HAL_TIM_ReadCapturedValue(htim, HALL_CAPTURE_CHANNEL);
+
         hall_sensor_capture_handler(capture_value);
     }
 }
