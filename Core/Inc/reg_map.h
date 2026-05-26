@@ -10,12 +10,18 @@ extern "C" {
  * Register address map
  * ============================================================
  *
- * 上位机通过 I2C 写入这些寄存器，STM32 在控制周期中读取寄存器值。
+ * Register addresses used by the I2C register interface.
  *
- * 当前寄存器定义：
- *   REG_MODE          : 电机控制模式
- *   REG_PWM_US_L/H    : 开环 PWM 脉宽，单位 us，小端格式
- *   REG_TARGET_RPM_L/H: PID 目标转速，单位 RPM，小端格式
+ * The host writes command values to these addresses. The STM32 stores
+ * them in the internal register buffer in reg.c, and motor_control.c
+ * reads them during each motor-control update.
+ *
+ * Register layout:
+ *   REG_MODE           -> Motor control mode.
+ *   REG_PWM_US_L/H     -> Open-loop PWM pulse width in microseconds,
+ *                         stored as little-endian int16_t.
+ *   REG_TARGET_RPM_L/H -> Target motor speed in RPM,
+ *                         stored as little-endian int16_t.
  */
 typedef enum
 {
@@ -30,28 +36,27 @@ typedef enum
     REG_COUNT
 } RegAddr_t;
 
-
 /*
  * ============================================================
  * Motor mode values stored in REG_MODE
  * ============================================================
  *
- * 注意：
- * 这些值是“寄存器协议”的一部分。
- * reg.c、motor_control.c、上位机都应该使用同一套数值。
+ * These values are part of the register protocol. The host-side command
+ * format, reg.c, and motor_control.c must use the same numeric values.
  */
 #define REG_MOTOR_MODE_OPENLOOP_PWM        0
 #define REG_MOTOR_MODE_PID_ACTIVE_BRAKE    1
 #define REG_MOTOR_MODE_PID_RPM             2
-
 
 /*
  * ============================================================
  * Default register values
  * ============================================================
  *
- * 这些默认值只表示寄存器上电后的初始状态。
- * reg.c 可以使用它们，而不需要包含 motor_control.h。
+ * Default values loaded into the internal register buffer by reg_init().
+ *
+ * These defaults define the initial command state before the host writes
+ * new values through the I2C register interface.
  */
 #define REG_DEFAULT_MODE                   REG_MOTOR_MODE_OPENLOOP_PWM
 #define REG_DEFAULT_PWM_US                 1500
@@ -61,4 +66,4 @@ typedef enum
 }
 #endif
 
-#endif
+#endif /* REG_MAP_H */

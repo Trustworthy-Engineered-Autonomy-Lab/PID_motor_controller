@@ -9,65 +9,109 @@ extern "C" {
 #include <stdint.h>
 #include "reg_map.h"
 
-/* 电机模式定义：与 REG_MODE 寄存器协议保持一致 */
+/*
+ * Motor control mode aliases.
+ *
+ * These values are mapped directly to the REG_MODE register protocol.
+ * Keep them synchronized with the register definitions in reg_map.h.
+ */
 #define MOTOR_MODE_OPENLOOP_PWM       REG_MOTOR_MODE_OPENLOOP_PWM
 #define MOTOR_MODE_PID_ACTIVE_BRAKE   REG_MOTOR_MODE_PID_ACTIVE_BRAKE
 #define MOTOR_MODE_PID_RPM            REG_MOTOR_MODE_PID_RPM
 
-/* PWM输出接口 */
+/*
+ * PWM output debug variables.
+ *
+ * debug_pwm_us stores the latest clamped PWM pulse width in microseconds.
+ * debug_pwm_ccr stores the latest CCR value written to the PWM timer.
+ */
 extern volatile int16_t debug_pwm_us;
 extern volatile uint32_t debug_pwm_ccr;
 
-uint32_t Motor_Control_PWM_UsToCcr(int16_t pulse_us);
-void Motor_Control_Set_PWM_US(int16_t pulse_us);
+/*
+ * Converts a PWM pulse width in microseconds to a timer CCR value.
+ *
+ * The input pulse width is clamped to the configured valid PWM range
+ * before conversion.
+ */
+uint32_t motor_control_pwm_us_to_ccr(int16_t pulse_us);
 
 /*
- * PID 调试变量。
+ * Sets the motor PWM output pulse width in microseconds.
+ *
+ * The input pulse width is clamped to the configured valid PWM range.
+ * The function updates both the timer compare register and the PWM
+ * debug variables.
+ */
+void motor_control_set_pwm_us(int16_t pulse_us);
+
+/*
+ * PID control debug variables.
+ *
+ * debug_motor_rpm stores the RPM feedback value used by the PID update.
+ * debug_pid_output stores the latest PID output value.
+ * debug_pid_error stores the latest setpoint-feedback error.
  */
 extern volatile float debug_motor_rpm;
 extern volatile float debug_pid_output;
 extern volatile float debug_pid_error;
 
+/*
+ * Active-brake parameters for zero-RPM commands in active-brake mode.
+ *
+ * MOTOR_BRAKE_PWM_US is the braking pulse width.
+ * MOTOR_BRAKE_ON_RPM enables braking above this RPM threshold.
+ * MOTOR_BRAKE_OFF_RPM disables braking below this RPM threshold.
+ */
 #define MOTOR_BRAKE_PWM_US 1480
 #define MOTOR_BRAKE_ON_RPM 80.0f
 #define MOTOR_BRAKE_OFF_RPM 30.0f
 
 /*
- * 电机控制初始化。
+ * Initializes the motor-control module.
  *
- * 当前主要用于初始化 PID 控制器。
+ * This function resets the motor command state to the default open-loop
+ * PWM mode and initializes the PID controller.
  */
-void Motor_Control_Init(void);
+void motor_control_init(void);
 
 /*
- * 电机控制周期更新函数。
+ * Performs one motor-control update.
  *
- * 在 User_Loop() 的 TIM1 控制周期中调用。
- * 根据 motor_mode 选择：
- *   STOP
- *   OPENLOOP_PWM
- *   PID_RPM
+ * This function reads the command registers, updates the active motor
+ * mode, and applies the selected control behavior:
+ *   MOTOR_MODE_OPENLOOP_PWM     -> direct PWM pulse-width command.
+ *   MOTOR_MODE_PID_ACTIVE_BRAKE -> PID speed control with active braking
+ *                                  when the target RPM is zero or below.
+ *   MOTOR_MODE_PID_RPM          -> PID speed control with neutral output
+ *                                  when the target RPM is zero or below.
+ *
+ * In the current project, user_loop() calls this function when the
+ * control update flag is set by the control timer.
  */
-void Motor_Control_Update(void);
+void motor_control_update(void);
 
 /*
- * 重置电机 PID 控制器。
+ * Resets the motor PID controller state.
  *
- * 外部模块如果需要在模式切换时清空 PID 积分项，
- * 应该调用这个函数，而不是直接访问 motor_pid。
+ * External modules should use this function when the PID integral or
+ * derivative history must be cleared, instead of accessing motor_pid
+ * directly.
  */
-void Motor_Control_Reset_PID(void);
+void motor_control_reset_pid(void);
 
 /*
- * 速度 / 转速 / PWM 转换相关函数。
+ * Updates the PWM command for PID-based RPM control.
+ *
+ * For positive RPM setpoints, this function computes the PID correction
+ * from the current RPM feedback and applies the resulting PWM command.
+ * For zero or negative RPM setpoints, it resets the PID controller and
+ * applies the stop behavior selected by the current motor mode.
  */
-float rpm_update(int16_t speed_setpoint);
-void openloop_pwm_update(float rpm_setpoint);
 void pid_pwm_update(float rpm_setpoint);
-uint32_t rpm_to_pwm_duty(int16_t rpm_setpoint);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif
+#endif /* MOTOR_CONTROL_H */

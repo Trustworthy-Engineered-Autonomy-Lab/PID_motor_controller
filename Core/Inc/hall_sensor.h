@@ -1,5 +1,5 @@
-#ifndef HALL_SPEED_H
-#define HALL_SPEED_H
+#ifndef HALL_SENSOR_H
+#define HALL_SENSOR_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -8,40 +8,56 @@ extern "C" {
 #include <stdint.h>
 
 /*
- * 霍尔输入捕获值：
- * 记录相邻霍尔边沿之间的定时器计数。
+ * Latest TIM3 Hall capture count used for RPM conversion.
+ *
+ * This value is updated by hall_sensor_capture_handler(), which is
+ * called from the input-capture callback path.
  */
 extern volatile uint32_t hall_capture_value;
 
 /*
- * 记录上一次霍尔传感器更新时间。
+ * Hall sensor update timestamp variable.
+ *
+ * This variable is currently declared and defined for external access,
+ * but the current Hall sensor implementation does not update it.
  */
-extern volatile uint32_t lastHallSensorUpdate;
+extern volatile uint32_t last_hall_sensor_update;
 
 /*
- * 霍尔捕获异常跳变调试变量。
+ * Debug variables used to monitor large changes in Hall capture values.
+ *
+ * debug_hall_capture_prev stores the previous capture value.
+ * debug_hall_capture_delta stores the absolute difference between the
+ * current and previous capture values.
+ * debug_hall_capture_spike_count counts large capture-value jumps.
  */
 extern volatile uint32_t debug_hall_capture_prev;
 extern volatile uint32_t debug_hall_capture_delta;
 extern volatile uint32_t debug_hall_capture_spike_count;
 
 /*
- * 霍尔捕获值异常跳变检查。
+ * Updates Hall capture spike debug variables.
+ *
+ * This function is used for debugging only. It does not directly change
+ * motor speed feedback or control output.
  */
 void hall_capture_spike_check(uint32_t capture_value);
 
 /*
- * TIM3 输入捕获测速处理函数。
+ * Handles a TIM3 Hall input-capture event.
  *
- * 在 HAL_TIM_IC_CaptureCallback() 中调用。
+ * The caller passes in the captured TIM3 count value. In the current
+ * project, this function is called from HAL_TIM_IC_CaptureCallback()
+ * after reading the configured Hall capture channel.
  */
-/*void Hall_Speed_Capture_Handler(TIM_HandleTypeDef *htim);*/
 void hall_sensor_capture_handler(uint32_t capture_value);
 
 /*
- * TIM3 溢出超时处理函数。
+ * Handles a TIM3 Hall timer period-elapsed event.
  *
- * 在 HAL_TIM_PeriodElapsedCallback() 的 TIM3 分支中调用。
+ * In the current project, this function is called from the TIM3 branch
+ * of HAL_TIM_PeriodElapsedCallback() and applies the Hall no-edge
+ * timeout logic.
  */
 void hall_sensor_timeout_handler(void);
 
@@ -49,4 +65,4 @@ void hall_sensor_timeout_handler(void);
 }
 #endif
 
-#endif
+#endif /* HALL_SENSOR_H */

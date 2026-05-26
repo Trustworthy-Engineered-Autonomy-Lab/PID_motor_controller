@@ -1,5 +1,3 @@
-
-/* Includes */
 #include "user.h"
 #include "app_config.h"
 #include "reg.h"
@@ -7,38 +5,49 @@
 #include "lp_filter.h"
 #include "hall_sensor.h"
 #include <math.h>
-/* End Includes */
 
 
 /* Variable Declarations */
-
-/* 标志位：由中断置 1，由主循环清 0。 */
+/*
+ * Control-loop update flag.
+ *
+ * The control timer callback sets this flag. The main loop clears it
+ * after one control update has been processed.
+ */
 volatile uint8_t control_update_flag = 0;
 
+/*
+ * Local RPM low-pass filter instance used by the user application loop.
+ */
 static LP_Filter_t rpm_lp_filter;
-
 /* End Variable Definitions */
 
 
 /* Function Declarations */
-void TIM_PER_CHECK(void);
+void tim_per_check(void);
 
-void User_Error_Handler(uint8_t count);
+void user_error_handler(uint8_t count);
 /* End Function Declarations */
 
 
 /* Function Definitions */
-
-void User_Init(void)
+/*
+ * Initializes the user application layer.
+ *
+ * This function initializes the register interface, RPM filter, and
+ * motor-control module. It then starts the ESC PWM output, the Hall
+ * sensor capture/timeout timers, and the control-loop timer.
+ */
+void user_init(void)
 {
     reg_init();
 
     lp_filter_init(&rpm_lp_filter, RPM_FILTER_ALPHA);
 
-    Motor_Control_Init();
+    motor_control_init();
 
     HAL_TIM_PWM_Start(&MOTOR_PWM_TIMER_HANDLE, MOTOR_PWM_CHANNEL);
-    Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
+    motor_control_set_pwm_us(PWM_US_NEUTRAL);
 
     HAL_TIMEx_HallSensor_Start_IT(&HALL_TIMER_HANDLE);
     HAL_TIM_Base_Start_IT(&HALL_TIMER_HANDLE);
@@ -46,7 +55,15 @@ void User_Init(void)
     HAL_TIM_Base_Start_IT(&CONTROL_TIMER_HANDLE);
 }
 
-void User_Loop(void)
+/*
+ * Runs one iteration of the user application loop.
+ *
+ * When the control update flag is set, this function clears the flag,
+ * updates the RPM low-pass filter, synchronizes the RPM feedback
+ * variables, increments the filter debug counter, and runs one
+ * motor-control update.
+ */
+void user_loop(void)
 {
     if (control_update_flag == 1)
     {
@@ -60,35 +77,54 @@ void User_Loop(void)
 
         debug_filter_update_count++;
 
-        Motor_Control_Update();
+        motor_control_update();
     }
 }
 
 /*
- * 检查定时器周期是否符合预期。
- * 如果 CubeMX 中预分频 PSC、自动重装载 ARR 或时钟源配置错误，
- * 这里会进入 User_Error_Handler()，通过 LED 闪烁次数提示错误来源。
+ * Checks whether the configured timer periods match the expected values.
+ *
+ * If a timer period is outside the allowed tolerance, the function enters
+ * user_error_handler() with a code that identifies the failed timer check.
+ *
+ * This function is a diagnostic helper. It is not called automatically by
+ * user_init() in the current code.
  */
-void TIM_PER_CHECK(void){
-	/* TIM1：控制循环周期检查，允许误差 0.1 ms。 */
+void tim_per_check(void){
+    /*
+     * TIM1 control-loop period check.
+     * Allowed error: 0.1 ms.
+     */
 	if(fabs(TIM1_PER_MS - EXPECTED_TIM1_PER_MS) > .1){
-		User_Error_Handler(1);
+		user_error_handler(1);
 	}
 
-	/* TIM2：PWM 输出周期检查，允许误差 0.1 ms。 */
+    /*
+     * TIM2 PWM period check.
+     * Allowed error: 0.1 ms.
+     */
 	if(fabs(TIM2_PER_MS - EXPECTED_TIM2_PER_MS) > .1){
-		User_Error_Handler(2);
+		user_error_handler(2);
 	}
 
-	/* TIM3：霍尔测速定时器周期检查，允许误差 1 ms。 */
+    /*
+     * TIM3 Hall timer period check.
+     * Allowed error: 1 ms.
+     */
 	if(fabs(TIM3_PER_MS - EXPECTED_TIM3_PER_MS) > 1){
-		User_Error_Handler(3);
+		user_error_handler(3);
 	}
 }
 /* End Function Definition */
 
 
 /* Interrupt Functions */
+/*
+ * Handles timer period-elapsed callbacks.
+ *
+ * The control timer sets the control update flag. The Hall timer calls
+ * the Hall sensor timeout handler for no-edge detection.
+ */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == CONTROL_TIMER_HANDLE.Instance)
@@ -102,6 +138,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }
 
+/*
+ * Handles timer input-capture callbacks.
+ *
+ * When a Hall sensor capture event is received, this function reads the
+ * configured Hall capture channel and forwards the captured value to the
+ * Hall sensor module.
+ */
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == HALL_TIMER_HANDLE.Instance)
@@ -114,23 +157,27 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 /* End Interrupt Functions */
 
 /*
- * 自定义错误处理函数。
+ * Handles timer-period diagnostic errors.
  *
- * 用途：当定时器周期检查失败时，通过绿色 LED 闪烁次数提示错误来源。
- * 1 次闪烁：TIM1 周期错误
- * 2 次闪烁：TIM2 周期错误
- * 3 次闪烁：TIM3 周期错误
+ * Interrupts are disabled, and the green LED blinks according to the
+ * error code:
+ *   1 blink  -> TIM1 period check failed.
+ *   2 blinks -> TIM2 period check failed.
+ *   3 blinks -> TIM3 period check failed.
  *
- * 注意：这里使用空循环做延时，不依赖 SysTick。
+ * The delay loops are blocking software delays and do not depend on
+ * SysTick.
  */
-void User_Error_Handler(uint8_t code)
+void user_error_handler(uint8_t code)
 {
 
   __disable_irq();
   HAL_GPIO_WritePin(LED_Green_GPIO_Port, LED_Green_Pin, GPIO_PIN_SET);
   while (1)
   {
-	  /* 按错误代码闪烁对应次数。 */
+      /*
+       * Blink the LED according to the error code.
+       */
       for (uint8_t i=0; i<code; i++)
       {
 
@@ -140,7 +187,9 @@ void User_Error_Handler(uint8_t code)
           for (volatile uint32_t i = 0; i < 800000; i++) {};
       }
 
-      /* 每组闪烁之间暂停一段时间。 */
+      /*
+       * Insert a longer pause between blink groups.
+       */
       for (volatile uint32_t i = 0; i < 4000000; i++) {};
 
   }

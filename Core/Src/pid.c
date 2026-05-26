@@ -1,7 +1,12 @@
 #include "pid.h"
 
-// PID Init function
-void PID_Init(PID_t *pid,
+/*
+ * Initializes a PID controller instance.
+ *
+ * The function stores the PID gains, clears the controller memory, and
+ * stores the absolute values of the integral and output limits.
+ */
+void pid_init(PID_t *pid,
               float kp,
               float ki,
               float kd,
@@ -32,9 +37,12 @@ void PID_Init(PID_t *pid,
     pid->pid_max = pid_max;
 }
 
-
-// Resets integral and derivative memory
-void PID_Reset(PID_t *pid)
+/*
+ * Resets the PID controller memory.
+ *
+ * The PID gains and configured limits are left unchanged.
+ */
+void pid_reset(PID_t *pid)
 {
     if (pid == 0) {
         return;
@@ -45,9 +53,16 @@ void PID_Reset(PID_t *pid)
     pid->output = 0.0f;
 }
 
-
-// Computes PID output
-void PID_Compute(PID_t *pid,
+/*
+ * Computes one PID controller update.
+ *
+ * If dt is less than or equal to zero, the output is cleared and the
+ * update is skipped.
+ *
+ * The accumulated error is limited by integral_max before the integral
+ * term is computed. The final PID output is limited by pid_max.
+ */
+void pid_compute(PID_t *pid,
                  float setpoint,
                  float measurement,
                  float dt)
@@ -63,10 +78,14 @@ void PID_Compute(PID_t *pid,
 
     float error = setpoint - measurement;
 
-    /* Proportional */
+    /*
+     * Proportional term.
+     */
     float p = pid->kp * error;
 
-    /* Integral */
+    /*
+     * Integral term with accumulated-error limiting.
+     */
     pid->error_integral += error * dt;
 
     if (pid->error_integral > pid->integral_max) {
@@ -77,7 +96,9 @@ void PID_Compute(PID_t *pid,
 
     float i = pid->ki * pid->error_integral;
 
-    /* Derivative */
+    /*
+     * Derivative term based on the change in error.
+     */
     float derivative = (error - pid->error_previous) / dt;
     float d = pid->kd * derivative;
 

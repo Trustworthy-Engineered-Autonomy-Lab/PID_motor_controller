@@ -4,17 +4,32 @@
 #include "pid.h"
 #include "lp_filter.h"
 
-/* PWM */
+/*
+ * PWM output debug values.
+ */
 volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;
 volatile uint32_t debug_pwm_ccr = 0;
 
-uint32_t Motor_Control_PWM_UsToCcr(int16_t pulse_us)
+/*
+ * Converts a PWM pulse width in microseconds to a TIM2 CCR value.
+ *
+ * The input is clamped to the configured valid PWM range before
+ * conversion.
+ */
+uint32_t motor_control_pwm_us_to_ccr(int16_t pulse_us)
 {
     pulse_us = PWM_US_CLAMP(pulse_us);
     return PWM_US_TO_CCR(pulse_us);
 }
 
-void Motor_Control_Set_PWM_US(int16_t pulse_us)
+/*
+ * Applies a PWM pulse-width command to the motor PWM timer.
+ *
+ * The input pulse width is clamped before conversion. The resulting CCR
+ * value is written to the configured PWM timer channel, and the debug
+ * variables are updated with the applied values.
+ */
+void motor_control_set_pwm_us(int16_t pulse_us)
 {
     pulse_us = PWM_US_CLAMP(pulse_us);
 
@@ -27,103 +42,130 @@ void Motor_Control_Set_PWM_US(int16_t pulse_us)
 }
 
 /*
- * 电机 PID 控制器实例。
+ * PID controller instance used by the motor-control module.
  */
 PID_t motor_pid;
 
 /*
- * PID 调试变量。
+ * PID update debug values.
  */
 volatile float debug_motor_rpm = 0.0f;
 volatile float debug_pid_output = 0.0f;
 volatile float debug_pid_error = 0.0f;
 
+/*
+ * Current motor command state.
+ *
+ * motor_mode selects the active control mode.
+ * target_pwm_us stores the open-loop PWM command.
+ * target_rpm stores the PID speed command.
+ * speed_setpoint mirrors target_pwm_us in open-loop mode and target_rpm
+ * in PID modes. The current control logic uses target_pwm_us and
+ * target_rpm directly.
+ */
 volatile uint8_t motor_mode = MOTOR_MODE_OPENLOOP_PWM;
 volatile int16_t target_pwm_us = PWM_US_NEUTRAL;
 volatile int16_t target_rpm = 0;
 volatile int16_t speed_setpoint = PWM_US_NEUTRAL;
 
 /*
- * 霍尔测速得到的原始瞬时 RPM。
+ * Raw RPM feedback value.
  *
- * 每次 TIM3 输入捕获时，根据单次霍尔边沿间隔计算。
- * 该值响应最快，但低速时容易波动。
+ * This value is updated by the Hall sensor path and by the control-loop
+ * filter synchronization logic.
  */
 volatile float motor_rpm_raw = 0.0f;
 
 /*
- * 滤波后的 RPM。
+ * Filtered RPM feedback value.
  *
- * 该值由 motor_rpm_raw 经过一阶低通滤波得到，
- * 更适合在 STM32CubeMonitor 中观察，也更适合作为 PID 反馈值。
+ * This value is produced by the RPM low-pass filter in the control loop.
+ * The Hall timeout handler may also clear it when no Hall edge is
+ * detected during a timeout window.
  */
 volatile float motor_rpm_filtered = 0.0f;
 
 /*
- * 兼容旧变量名。
+ * Backward-compatible RPM feedback variable.
  *
- * 当前 motor_rpm 同步为 motor_rpm_filtered。
+ * In the current project, this value is synchronized with
+ * motor_rpm_filtered and is used as the feedback input for PID control.
  */
 volatile float motor_rpm = 0.0f;
 
 /*
- * 最新一次霍尔捕获得到的原始 RPM。
+ * Latest raw RPM sample from the Hall capture path.
  *
- * 霍尔中断只更新这个变量；
- * 滤波器在 TIM1 控制周期中运行，
- * 使滤波采样周期与 PID 采样周期一致。
+ * The Hall capture handler updates this value. The control loop passes
+ * it into the low-pass filter during each control update.
  */
 volatile float latest_raw_rpm = 0.0f;
 
 /*
- * 调试用：观察滤波器是否按 TIM1 周期运行。
- * 如果 TIM1 = 10 ms，该变量每秒应增加约 100。
+ * RPM filter update debug counter.
+ *
+ * This counter is incremented each time the control loop computes one
+ * RPM filter update.
  */
 volatile uint32_t debug_filter_update_count = 0;
 
 /*
- * PID 闭环模式下的目标转速。
+ * Latest RPM setpoint passed to pid_pwm_update().
  *
- * 当前主要使用 target_rpm。
- * rpm_setpoint 暂时保留，后续如果完全不用可以删除。
+ * This variable is internal to this module and mirrors the function
+ * input used by the PID update logic.
  */
 static volatile float rpm_setpoint = 0.0f;
 
 /*
- * PID 参数。
+ * PID configuration values.
+ *
+ * dt is derived from the TIM1 control period.
+ * kp, ki, and kd are the PID gains.
+ * integral_max limits the accumulated PID error.
+ * pid_max limits the PID output around the neutral PWM pulse width.
  */
 const float dt = TIM1_PER_MS / 1000.0f;
-const float Kp = 0.00002f;
-const float Ki = 0.00003f;
-const float Kd = 0.0f;
-const float Integral_max = 100000.0f;
+const float kp = 0.00002f;
+const float ki = 0.00003f;
+const float kd = 0.0f;
+const float integral_max = 100000.0f;
 const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;
 
 /*
- * 电机控制初始化。
+ * Initializes the motor-control module.
+ *
+ * The command state is reset to open-loop neutral output, and the PID
+ * controller is initialized with the configured gains and limits.
  */
-void Motor_Control_Init(void)
+void motor_control_init(void)
 {
     motor_mode = MOTOR_MODE_OPENLOOP_PWM;
     target_pwm_us = PWM_US_NEUTRAL;
     target_rpm = 0;
     speed_setpoint = PWM_US_NEUTRAL;
 
-    PID_Init(&motor_pid, Kp, Ki, Kd, Integral_max, pid_max);
+    pid_init(&motor_pid, kp, ki, kd, integral_max, pid_max);
 }
 
 /*
- * 重置电机 PID 控制器。
+ * Resets the motor PID controller state.
  *
- * 这个函数提供给 register_map.c 等外部模块调用，
- * 外部模块不需要也不应该直接访问 motor_pid。
+ * External modules should call this function when the PID memory must be
+ * cleared, instead of accessing motor_pid directly.
  */
-void Motor_Control_Reset_PID(void)
+void motor_control_reset_pid(void)
 {
-    PID_Reset(&motor_pid);
+    pid_reset(&motor_pid);
 }
 
-static void Motor_Control_Read_Registers(void)
+/*
+ * Reads motor command registers and updates the local command state.
+ *
+ * Invalid motor modes fall back to open-loop PWM mode. Invalid open-loop
+ * PWM pulse-width commands fall back to the neutral pulse width.
+ */
+static void motor_control_read_registers(void)
 {
     uint8_t mode = MOTOR_MODE_OPENLOOP_PWM;
     uint8_t buf[2] = {0};
@@ -178,19 +220,20 @@ static void Motor_Control_Read_Registers(void)
 }
 
 /*
- * 电机控制周期更新函数。
+ * Performs one motor-control update.
  *
- * 由 User_Loop() 在 TIM1 控制周期中调用。
+ * The function first refreshes the local command state from the register
+ * buffer, then applies the selected control mode.
  */
-void Motor_Control_Update(void)
+void motor_control_update(void)
 {
-    Motor_Control_Read_Registers();
+    motor_control_read_registers();
 
     switch (motor_mode)
     {
         case MOTOR_MODE_OPENLOOP_PWM:
         {
-            Motor_Control_Set_PWM_US(target_pwm_us);
+            motor_control_set_pwm_us(target_pwm_us);
             break;
         }
 
@@ -210,30 +253,39 @@ void Motor_Control_Update(void)
         {
             motor_mode = MOTOR_MODE_OPENLOOP_PWM;
             target_pwm_us = PWM_US_NEUTRAL;
-            Motor_Control_Set_PWM_US(PWM_US_NEUTRAL);
+            motor_control_set_pwm_us(PWM_US_NEUTRAL);
             break;
         }
     }
 }
 
 /*
- * PID 闭环 PWM 更新函数。
+ * Updates the PWM command for PID-based RPM control.
  *
- * 在 MOTOR_MODE_PID_RPM 模式下调用。
+ * For positive RPM setpoints, the function computes a PID correction
+ * from the current RPM feedback and applies it around the neutral PWM
+ * pulse width.
+ *
+ * For zero or negative RPM setpoints, the PID controller is reset. In
+ * active-brake mode, the function applies hysteretic braking based on
+ * the current RPM feedback. In the non-braking PID mode, it outputs the
+ * neutral pulse width.
  */
 void pid_pwm_update(float rpm_setpoint_input)
 {
 	rpm_setpoint = rpm_setpoint_input;
 	if (rpm_setpoint <= 0.0f) {
 
-	    PID_Reset(&motor_pid);
+	    pid_reset(&motor_pid);
 
 	    float feedback_rpm = motor_rpm;
 	    int16_t pulse_us;
 
 	    /*
-	     * PID 主动刹车模式：
-	     * 速度高时主动刹车，速度低时回到 neutral。
+	     * Active-brake stop behavior.
+	     *
+	     * Braking is enabled when the feedback RPM rises above the brake-on
+	     * threshold and disabled when it falls below the brake-off threshold.
 	     */
 	    if (motor_mode == MOTOR_MODE_PID_ACTIVE_BRAKE) {
 
@@ -257,14 +309,16 @@ void pid_pwm_update(float rpm_setpoint_input)
 	    }
 
 	    /*
-	     * PID 自然停止模式：
-	     * 不主动刹车，直接输出 neutral，让电机自然滑停。
+	     * Non-braking stop behavior.
+	     *
+	     * The PWM output is set to neutral so the motor can coast down
+	     * without an active braking pulse.
 	     */
 	    else {
 	        pulse_us = PWM_US_NEUTRAL;
 	    }
 
-	    Motor_Control_Set_PWM_US(pulse_us);
+	    motor_control_set_pwm_us(pulse_us);
 
 	    debug_motor_rpm = feedback_rpm;
 	    debug_pid_output = 0.0f;
@@ -273,19 +327,24 @@ void pid_pwm_update(float rpm_setpoint_input)
 	    return;
 	}
 
-	/* 计算 PID 输出。motor_pid.output 表示相对于中位脉宽的修正量。 */
+	/*
+	 * Compute the PID output. motor_pid.output is the pulse-width
+	 * correction relative to the neutral PWM pulse width.
+	 */
 	float feedback_rpm = motor_rpm;
-	PID_Compute(&motor_pid, rpm_setpoint, feedback_rpm, dt);
+	pid_compute(&motor_pid, rpm_setpoint, feedback_rpm, dt);
 	debug_motor_rpm = feedback_rpm;
 	debug_pid_output = motor_pid.output;
 	debug_pid_error = rpm_setpoint - feedback_rpm;
 
-	/* 将 PID 输出转换为实际 PWM 脉宽，再转换为 CCR。 */
+	/*
+	 * Convert the PID correction to an actual PWM pulse width.
+	 */
 	float pulse_width = PWM_ZERO_PULSEWIDTH + motor_pid.output;
 
 	/*
-	 * 当前未加入反转逻辑，所以低于中位值的输出被限制到中位值。
-	 * 后续如果需要电机反转，需要重新设计正转 / 停止 / 反转状态机。
+	 * This project currently does not implement reverse motor control.
+	 * Any PID result below the neutral pulse width is limited to neutral.
 	 */
 	if (pulse_width < PWM_ZERO_PULSEWIDTH) {
 	    pulse_width = PWM_ZERO_PULSEWIDTH;
@@ -293,5 +352,5 @@ void pid_pwm_update(float rpm_setpoint_input)
 	    pulse_width = PWM_MAX_PULSEWIDTH;
 	}
 
-	Motor_Control_Set_PWM_US((int16_t)(pulse_width * 1000.0f));
+	motor_control_set_pwm_us((int16_t)(pulse_width * 1000.0f));
 }

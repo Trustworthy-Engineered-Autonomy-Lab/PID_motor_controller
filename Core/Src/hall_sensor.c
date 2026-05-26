@@ -1,35 +1,53 @@
-#include <hall_sensor.h>
-#include <lp_filter.h>
+#include "hall_sensor.h"
+#include "lp_filter.h"
 #include "app_config.h"
 
+/*
+ * Indicates whether at least one Hall edge has been captured since the
+ * previous TIM3 period-elapsed event.
+ *
+ * The timeout handler uses this flag to distinguish between normal Hall
+ * activity and a no-edge timeout condition.
+ */
 static volatile uint8_t hall_edge_seen_since_timeout = 0;
 
 /*
- * 霍尔输入捕获值：
- * 记录相邻霍尔边沿之间的定时器计数。
+ * Latest TIM3 Hall capture count used for RPM conversion.
+ *
+ * In the current configuration, the capture value is treated as the
+ * timer-count interval associated with the latest Hall edge.
  */
 volatile uint32_t hall_capture_value = 0;
 
-
 /*
- * 记录上一次霍尔传感器更新时间。
+ * Hall sensor update timestamp placeholder.
+ *
+ * This variable is currently defined for external access, but this
+ * module does not update it.
  */
-volatile uint32_t lastHallSensorUpdate = 0;
+volatile uint32_t last_hall_sensor_update = 0;
 
 /*
- * 霍尔捕获异常跳变调试变量。
+ * Debug variables for detecting large Hall capture-value changes.
+ *
+ * debug_hall_capture_prev stores the previous capture value.
+ * debug_hall_capture_delta stores the absolute difference between the
+ * current and previous capture values.
+ * debug_hall_capture_spike_count counts capture values that are much
+ * smaller or larger than the previous value.
  */
 volatile uint32_t debug_hall_capture_prev = 0;
 volatile uint32_t debug_hall_capture_delta = 0;
 volatile uint32_t debug_hall_capture_spike_count = 0;
 
 /*
- * 霍尔捕获值异常跳变检查。
+ * Updates Hall capture spike debug data.
  *
- * 该函数只用于调试，不参与控制。
+ * This function is used only for debugging and does not directly affect
+ * RPM feedback, filtering, PID control, or PWM output.
  *
- * 如果 hall_capture_value 相比上一帧突然变得过大或过小，
- * 说明可能存在霍尔边沿干扰、漏捕获、低速不均匀或机械周期性波动。
+ * A spike is counted when the current capture value is less than half of
+ * the previous value or greater than twice the previous value.
  */
 void hall_capture_spike_check(uint32_t capture_value)
 {
@@ -45,9 +63,8 @@ void hall_capture_spike_check(uint32_t capture_value)
         }
 
         /*
-         * 简单异常判断：
-         * 当前捕获值小于上一次的一半，或大于上一次的 2 倍，
-         * 就记录为一次明显跳变。
+         * Count a large relative jump between two consecutive capture
+         * values for debugging.
          */
         if ((capture_value < (debug_hall_capture_prev / 2)) ||
             (capture_value > (debug_hall_capture_prev * 2)))
@@ -60,23 +77,27 @@ void hall_capture_spike_check(uint32_t capture_value)
 }
 
 /*
- * TIM3 输入捕获测速处理函数。
+ * Handles one TIM3 Hall input-capture event.
  *
- * 当 TIM3 捕获到霍尔传感器边沿时调用。
+ * The caller provides the captured TIM3 count value. This function stores
+ * the latest capture value, updates capture-jump debug data, converts the
+ * capture value to a raw RPM estimate when valid previous RPM feedback is
+ * available, and stores the latest raw RPM for the control-loop filter.
+ *
+ * Filtering is intentionally not performed in this capture handler. The
+ * RPM low-pass filter is updated later in the control loop.
  */
 void hall_sensor_capture_handler(uint32_t capture_value)
 {
 	hall_edge_seen_since_timeout = 1;
 
     /*
-     * 读取 TIM3 CCR1，获得本次霍尔边沿对应的捕获值。
-     * hall_capture_value 表示相邻霍尔边沿之间的定时器计数。
+     * Store the latest capture value for RPM conversion and debugging.
      */
     hall_capture_value = capture_value;
 
     /*
-     * 检查 hall_capture_value 是否出现明显异常跳变。
-     * 该检查只用于 CubeMonitor 调试观察，不参与控制。
+     * Update debug-only capture-jump statistics.
      */
     hall_capture_spike_check(hall_capture_value);
 
@@ -89,27 +110,38 @@ void hall_sensor_capture_handler(uint32_t capture_value)
     else
     {
         /*
-         * 电机刚从停止进入转动时，第一次捕获可能异常。
-         * 保留原来的 MIN_MOTOR_RPM 保护逻辑。
+         * Use the configured minimum measurable RPM as a startup fallback
+         * when the motor transitions from zero feedback to the first Hall
+         * capture event.
          */
         raw_rpm_now = MIN_MOTOR_RPM;
     }
 
     /*
-     * 霍尔中断只保存最新原始 RPM，不在这里执行滤波。
-     * 滤波仍然在 TIM1 控制周期中执行。
+     * Store the latest raw RPM. The filter update is handled by the
+     * control loop rather than by this interrupt-side capture handler.
      */
     latest_raw_rpm = raw_rpm_now;
     motor_rpm_raw = raw_rpm_now;
 }
 
+/*
+ * Handles one TIM3 period-elapsed event for Hall no-edge detection.
+ *
+ * If no Hall edge has been captured during the latest TIM3 period, the
+ * motor RPM feedback values are cleared. Otherwise, the captured edge is
+ * treated as valid activity and the RPM values are left unchanged.
+ *
+ * The edge-seen flag is reset at the end of each period so the next
+ * timeout window can be evaluated independently.
+ */
 void hall_sensor_timeout_handler(void)
 {
     if (hall_edge_seen_since_timeout == 0)
     {
         /*
-         * 没有输入捕获却发生 TIM3 溢出，
-         * 说明长时间没有霍尔边沿，认为电机停止。
+         * No Hall edge was captured during this timeout window. Clear all
+         * RPM feedback values so the control loop sees the motor as stopped.
          */
         latest_raw_rpm = 0.0f;
         motor_rpm_raw = 0.0f;
@@ -118,7 +150,7 @@ void hall_sensor_timeout_handler(void)
     }
 
     /*
-     * 每次 TIM3 溢出后，重新开始判断下一段时间内是否有 Hall 边沿。
+     * Start a new Hall edge detection window after each TIM3 period.
      */
     hall_edge_seen_since_timeout = 0;
 }

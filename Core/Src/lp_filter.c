@@ -1,17 +1,11 @@
-#include <lp_filter.h>
+#include "lp_filter.h"
 
 /*
- * RPM 一阶低通滤波函数。
+ * Initializes a first-order low-pass filter instance.
  *
- * 输入：
- *   raw_rpm：由单次霍尔捕获计算得到的原始瞬时 RPM。
- *
- * 输出：
- *   motor_rpm_filtered：滤波后的 RPM。
- *   motor_rpm：同步为滤波后的 RPM，供旧逻辑和 PID 使用。
- *
- * 滤波公式：
- *   filtered = filtered + alpha * (raw - filtered)
+ * The function clears the input, output, and initialization state.
+ * A negative alpha is converted to its absolute value. An alpha greater
+ * than 1.0f is clamped to 1.0f.
  */
 void lp_filter_init(LP_Filter_t *filter,
                     float alpha)
@@ -37,6 +31,20 @@ void lp_filter_init(LP_Filter_t *filter,
     filter->initialized = 0;
 }
 
+/*
+ * Computes one first-order low-pass filter update.
+ *
+ * The latest input sample is always stored in filter->input.
+ *
+ * If the input is less than or equal to zero, the filter output is
+ * cleared and the filter is marked uninitialized.
+ *
+ * If the filter is not initialized, the first positive input sample is
+ * copied directly to the output. After initialization, the output is
+ * updated with:
+ *
+ *   output = output + alpha * (input - output)
+ */
 void lp_filter_compute(LP_Filter_t *filter,
                        float input)
 {

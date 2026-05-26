@@ -1,5 +1,5 @@
-#ifndef RPM_FILTER_H
-#define RPM_FILTER_H
+#ifndef LP_FILTER_H
+#define LP_FILTER_H
 
 #include "app_config.h"
 
@@ -7,17 +7,17 @@
 extern "C" {
 #endif
 
-
 /*
- * RPM 一阶低通滤波系数。
+ * First-order low-pass filter state.
  *
- * alpha 越大，响应越快，但波动越明显；
- * alpha 越小，曲线越平滑，但响应更慢。
+ * alpha controls the filter response:
+ *   alpha = 0.0f keeps the previous output unchanged.
+ *   alpha = 1.0f makes the output follow the input immediately.
  *
- * 当前建议值：0.05f
+ * input stores the latest input sample.
+ * output stores the latest filtered output.
+ * initialized indicates whether the first valid sample has been loaded.
  */
-/*#define RPM_FILTER_ALPHA 0.05f*/
-
 typedef struct
 {
     float alpha;
@@ -28,45 +28,67 @@ typedef struct
 } LP_Filter_t;
 
 /*
- * 霍尔测速得到的原始瞬时 RPM。
+ * Raw RPM value used by the motor-control feedback path.
+ *
+ * In the current project, this value is assigned from the filter input
+ * in user_loop(). The Hall sensor module may also clear or update it
+ * when capture or timeout events occur.
  */
 extern volatile float motor_rpm_raw;
 
 /*
- * 滤波后的 RPM。
+ * Filtered RPM value used for monitoring and feedback.
+ *
+ * In the current project, this value is assigned from the filter output
+ * in user_loop(). The Hall sensor timeout handler may clear it when no
+ * Hall edge is detected during a timeout period.
  */
 extern volatile float motor_rpm_filtered;
 
 /*
- * 兼容旧变量名。
+ * Backward-compatible RPM feedback variable.
  *
- * 当前 motor_rpm 同步为 motor_rpm_filtered。
- * PID 控制中使用 motor_rpm 作为反馈值。
+ * In the current project, user_loop() keeps this value synchronized with
+ * motor_rpm_filtered, and the motor-control module uses it as the RPM
+ * feedback value.
  */
 extern volatile float motor_rpm;
 
 /*
- * 最新一次霍尔捕获得到的原始 RPM。
+ * Latest raw RPM value produced by the Hall sensor capture path.
  *
- * 霍尔中断更新这个变量；
- * TIM1 控制周期中调用 RPM_Filter_Update() 进行滤波。
+ * The Hall sensor capture handler writes this value. The control loop in
+ * user_loop() passes it into lp_filter_compute() when the control update
+ * flag is set.
  */
 extern volatile float latest_raw_rpm;
 
 /*
- * 调试用：观察滤波器是否按 TIM1 周期运行。
+ * Debug counter for RPM filter updates.
+ *
+ * This counter is incremented in user_loop() each time the RPM filter is
+ * computed during a control update.
  */
 extern volatile uint32_t debug_filter_update_count;
 
 /*
- * RPM 一阶低通滤波更新函数。
+ * Initializes a first-order low-pass filter instance.
+ *
+ * If the filter pointer is null, the function returns without changing
+ * any state. A negative alpha is converted to its absolute value, and an
+ * alpha greater than 1.0f is clamped to 1.0f.
  */
-
-/*void RPM_Filter_Update(float raw_rpm);*/
-
 void lp_filter_init(LP_Filter_t *filter,
                     float alpha);
 
+/*
+ * Computes one first-order low-pass filter update.
+ *
+ * If the filter pointer is null, the function returns without changing
+ * any state. If the input is less than or equal to zero, the output is
+ * cleared and the filter is marked uninitialized. The next positive
+ * input sample initializes the output directly.
+ */
 void lp_filter_compute(LP_Filter_t *filter,
                        float input);
 
@@ -74,4 +96,4 @@ void lp_filter_compute(LP_Filter_t *filter,
 }
 #endif
 
-#endif
+#endif /* LP_FILTER_H */

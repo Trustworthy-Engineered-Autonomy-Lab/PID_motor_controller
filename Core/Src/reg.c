@@ -4,12 +4,28 @@
 #include <errno.h>
 #include "app_config.h"
 
+/*
+ * I2C receive buffer size.
+ *
+ * One byte is used for the start register address. The remaining bytes
+ * can contain a full register-map write payload.
+ */
 #define I2C_RX_BUF_SIZE (REG_COUNT + 1)
 
+/*
+ * Internal register buffer and temporary I2C receive buffer.
+ */
 static uint8_t reg[REG_COUNT] = {0};
 static uint8_t i2c_rx_buf[I2C_RX_BUF_SIZE] = {0};
 static uint16_t i2c_rx_len = 0;
 
+/*
+ * Initializes the register module and enables the LL I2C slave interface.
+ *
+ * The internal register buffer and temporary I2C receive buffer are
+ * cleared first. The default command values are then loaded into the
+ * register buffer in little-endian format.
+ */
 void reg_init(void)
 {
     memset((void *)reg, 0, sizeof(reg));
@@ -31,6 +47,18 @@ void reg_init(void)
     LL_I2C_Enable(I2C1);
 }
 
+/*
+ * Reads bytes from the internal register buffer.
+ *
+ * addr is the first register address to read.
+ * data points to the destination buffer.
+ * len is the requested number of bytes.
+ *
+ * The function returns the number of bytes copied. It returns -EINVAL if
+ * the destination pointer is null or the start address is outside the
+ * register map. If the requested range extends past REG_COUNT, the read
+ * length is clipped to the valid range.
+ */
 int read_reg(uint32_t addr, uint8_t *data, size_t len)
 {
     if (data == NULL)
@@ -53,6 +81,18 @@ int read_reg(uint32_t addr, uint8_t *data, size_t len)
     return (int)len;
 }
 
+/*
+ * Writes bytes to the internal register buffer.
+ *
+ * addr is the first register address to write.
+ * data points to the source buffer.
+ * len is the requested number of bytes.
+ *
+ * The function returns the number of bytes copied. It returns -EINVAL if
+ * the source pointer is null or the start address is outside the register
+ * map. If the requested range extends past REG_COUNT, the write length is
+ * clipped to the valid range.
+ */
 int write_reg(uint32_t addr, const uint8_t *data, size_t len)
 {
     if (data == NULL)
@@ -75,12 +115,22 @@ int write_reg(uint32_t addr, const uint8_t *data, size_t len)
     return (int)len;
 }
 
-void I2C_LL_ResetRx(void)
+/*
+ * Clears the temporary I2C receive length.
+ *
+ * This is called when a new I2C slave receive transaction starts.
+ */
+void i2c_ll_reset_rx(void)
 {
     i2c_rx_len = 0;
 }
 
-void I2C_LL_RxByte(uint8_t data)
+/*
+ * Appends one byte to the temporary I2C receive buffer.
+ *
+ * Extra bytes are ignored when the temporary buffer is already full.
+ */
+void i2c_ll_rx_byte(uint8_t data)
 {
     if (i2c_rx_len < I2C_RX_BUF_SIZE)
     {
@@ -90,13 +140,19 @@ void I2C_LL_RxByte(uint8_t data)
     else
     {
         /*
-         * 超过缓冲区的数据直接丢弃。
-         * 后续可以加 debug_i2c_overflow_count++。
+         * Ignore bytes beyond the receive buffer size.
          */
     }
 }
 
-void I2C_LL_StopDetected(void)
+/*
+ * Handles the end of an I2C slave write transaction.
+ *
+ * The first received byte is treated as the start register address. The
+ * remaining bytes are committed to the internal register buffer through
+ * write_reg() so that register bounds are still checked.
+ */
+void i2c_ll_stop_detected(void)
 {
     if (i2c_rx_len >= 2)
     {
@@ -104,8 +160,8 @@ void I2C_LL_StopDetected(void)
         uint16_t data_len = i2c_rx_len - 1;
 
         /*
-         * 不要在这里直接 memcpy 到 reg[]。
-         * 必须通过 write_reg()，这样才有边界检查。
+         * Use write_reg() instead of writing to reg[] directly so that
+         * register bounds are checked consistently.
          */
         write_reg(start_addr, &i2c_rx_buf[1], data_len);
     }
