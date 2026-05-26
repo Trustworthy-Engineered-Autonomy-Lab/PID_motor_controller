@@ -13,10 +13,7 @@
 /* Variable Declarations */
 
 /* 标志位：由中断置 1，由主循环清 0。 */
-volatile uint8_t pwm_update_flag = 0;	// 当前版本暂未使用，保留给后续 PWM 更新逻辑
-volatile uint8_t pid_update_flag = 0;	// TIM1 周期触发；当前版本用作 PWM 周期刷新触发
-volatile uint8_t speed_update_flag = 0;	// I2C 收到新指令后置 1
-volatile uint8_t hall_update_flag = 0;	// 霍尔输入捕获或 TIM3 溢出后置 1
+volatile uint8_t control_update_flag = 0;
 
 static LP_Filter_t rpm_lp_filter;
 
@@ -51,16 +48,9 @@ void User_Init(void)
 
 void User_Loop(void)
 {
-    if (speed_update_flag == 1) {
-        speed_update_flag = 0;
-    }
-
-    if (hall_update_flag == 1) {
-        hall_update_flag = 0;
-    }
-
-    if (pid_update_flag == 1) {
-        pid_update_flag = 0;
+    if (control_update_flag == 1)
+    {
+        control_update_flag = 0;
 
         lp_filter_compute(&rpm_lp_filter, latest_raw_rpm);
 
@@ -103,7 +93,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == CONTROL_TIMER_HANDLE.Instance)
     {
-        pid_update_flag = 1;
+        control_update_flag = 1;
     }
 
     if (htim->Instance == HALL_TIMER_HANDLE.Instance)

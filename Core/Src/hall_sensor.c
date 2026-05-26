@@ -2,11 +2,7 @@
 #include <lp_filter.h>
 #include "app_config.h"
 
-/*
- * hall_update_flag 目前仍然定义在 user.c。
- * 霍尔捕获或超时时，需要置位这个标志。
- */
-extern volatile uint8_t hall_update_flag;
+static volatile uint8_t hall_edge_seen_since_timeout = 0;
 
 /*
  * 霍尔输入捕获值：
@@ -70,7 +66,7 @@ void hall_capture_spike_check(uint32_t capture_value)
  */
 void hall_sensor_capture_handler(uint32_t capture_value)
 {
-    hall_update_flag = 1;
+	hall_edge_seen_since_timeout = 1;
 
     /*
      * 读取 TIM3 CCR1，获得本次霍尔边沿对应的捕获值。
@@ -107,15 +103,9 @@ void hall_sensor_capture_handler(uint32_t capture_value)
     motor_rpm_raw = raw_rpm_now;
 }
 
-/*
- * TIM3 溢出超时处理函数。
- *
- * 如果 TIM3 溢出时 hall_update_flag == 0，
- * 说明较长时间没有检测到霍尔边沿，可以认为电机停止。
- */
 void hall_sensor_timeout_handler(void)
 {
-    if (hall_update_flag == 0)
+    if (hall_edge_seen_since_timeout == 0)
     {
         /*
          * 没有输入捕获却发生 TIM3 溢出，
@@ -125,7 +115,10 @@ void hall_sensor_timeout_handler(void)
         motor_rpm_raw = 0.0f;
         motor_rpm_filtered = 0.0f;
         motor_rpm = 0.0f;
-
-        hall_update_flag = 1;
     }
+
+    /*
+     * 每次 TIM3 溢出后，重新开始判断下一段时间内是否有 Hall 边沿。
+     */
+    hall_edge_seen_since_timeout = 0;
 }

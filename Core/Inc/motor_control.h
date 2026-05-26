@@ -7,11 +7,12 @@ extern "C" {
 
 #include "main.h"
 #include <stdint.h>
+#include "reg_map.h"
 
-/* 电机模式定义 */
-#define MOTOR_MODE_OPENLOOP_PWM       0
-#define MOTOR_MODE_PID_ACTIVE_BRAKE   1
-#define MOTOR_MODE_PID_RPM            2
+/* 电机模式定义：与 REG_MODE 寄存器协议保持一致 */
+#define MOTOR_MODE_OPENLOOP_PWM       REG_MOTOR_MODE_OPENLOOP_PWM
+#define MOTOR_MODE_PID_ACTIVE_BRAKE   REG_MOTOR_MODE_PID_ACTIVE_BRAKE
+#define MOTOR_MODE_PID_RPM            REG_MOTOR_MODE_PID_RPM
 
 /* PWM输出接口 */
 extern volatile int16_t debug_pwm_us;

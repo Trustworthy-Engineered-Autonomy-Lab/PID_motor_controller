@@ -3,7 +3,6 @@
 #include <string.h>
 #include <errno.h>
 #include "app_config.h"
-#include "motor_control.h"
 
 #define I2C_RX_BUF_SIZE (REG_COUNT + 1)
 
@@ -17,19 +16,13 @@ void reg_init(void)
     memset((void *)i2c_rx_buf, 0, sizeof(i2c_rx_buf));
     i2c_rx_len = 0;
 
-    /*
-     * 上电默认安全状态：
-     * mode = OPENLOOP_PWM
-     * pwm  = 1500us neutral
-     * rpm  = 0
-     */
-    reg[REG_MODE] = MOTOR_MODE_OPENLOOP_PWM;
+    reg[REG_MODE] = REG_DEFAULT_MODE;
 
-    reg[REG_PWM_US_L] = (uint8_t)(PWM_US_NEUTRAL & 0xFF);
-    reg[REG_PWM_US_H] = (uint8_t)((PWM_US_NEUTRAL >> 8) & 0xFF);
+    reg[REG_PWM_US_L] = (uint8_t)(REG_DEFAULT_PWM_US & 0xFF);
+    reg[REG_PWM_US_H] = (uint8_t)((REG_DEFAULT_PWM_US >> 8) & 0xFF);
 
-    reg[REG_TARGET_RPM_L] = 0;
-    reg[REG_TARGET_RPM_H] = 0;
+    reg[REG_TARGET_RPM_L] = (uint8_t)(REG_DEFAULT_TARGET_RPM & 0xFF);
+    reg[REG_TARGET_RPM_H] = (uint8_t)((REG_DEFAULT_TARGET_RPM >> 8) & 0xFF);
 
     LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_ACK);
     LL_I2C_EnableIT_EVT(I2C1);
