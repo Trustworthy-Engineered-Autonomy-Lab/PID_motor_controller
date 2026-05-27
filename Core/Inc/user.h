@@ -11,10 +11,10 @@
 void user_init(void);
 
 /*
- * Runs the main user application loop.
+ * Runs one control-loop update.
  *
- * This function should be called repeatedly from the main while loop. It
- * handles periodic control updates when the control update flag is set.
+ * This function is called directly from the control timer callback. It
+ * should not be called repeatedly from the main while loop.
  */
 void user_loop(void);
 

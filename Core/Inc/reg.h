@@ -12,9 +12,9 @@ extern "C" {
 /*
  * Initializes the internal register buffer and the LL I2C slave interface.
  *
- * This function clears the register buffer and I2C receive buffer, loads
- * the default command values defined in reg_map.h, and enables the I2C1
- * event, buffer, and error interrupts.
+ * This function clears the register buffer and I2C receive buffer, then
+ * enables the I2C1 event, buffer, and error interrupts. Module-specific
+ * default register values should be written by the modules that own them.
  */
 void reg_init(void);
 

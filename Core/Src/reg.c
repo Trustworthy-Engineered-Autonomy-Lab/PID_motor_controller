@@ -2,7 +2,6 @@
 #include "main.h"
 #include <string.h>
 #include <errno.h>
-#include "app_config.h"
 
 /*
  * I2C receive buffer size.
@@ -23,22 +22,14 @@ static uint16_t i2c_rx_len = 0;
  * Initializes the register module and enables the LL I2C slave interface.
  *
  * The internal register buffer and temporary I2C receive buffer are
- * cleared first. The default command values are then loaded into the
- * register buffer in little-endian format.
+ * cleared. Module-specific default register values are initialized by
+ * the modules that own those commands.
  */
 void reg_init(void)
 {
     memset((void *)reg, 0, sizeof(reg));
     memset((void *)i2c_rx_buf, 0, sizeof(i2c_rx_buf));
     i2c_rx_len = 0;
-
-    reg[REG_MODE] = REG_DEFAULT_MODE;
-
-    reg[REG_PWM_US_L] = (uint8_t)(REG_DEFAULT_PWM_US & 0xFF);
-    reg[REG_PWM_US_H] = (uint8_t)((REG_DEFAULT_PWM_US >> 8) & 0xFF);
-
-    reg[REG_TARGET_RPM_L] = (uint8_t)(REG_DEFAULT_TARGET_RPM & 0xFF);
-    reg[REG_TARGET_RPM_H] = (uint8_t)((REG_DEFAULT_TARGET_RPM >> 8) & 0xFF);
 
     LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_ACK);
     LL_I2C_EnableIT_EVT(I2C1);

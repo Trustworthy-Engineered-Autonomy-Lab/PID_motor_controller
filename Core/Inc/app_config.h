@@ -84,18 +84,12 @@ extern TIM_HandleTypeDef htim3;
  * ESC PWM pulse-width limits and reference values.
  *
  * PWM_MIN_PULSEWIDTH, PWM_ZERO_PULSEWIDTH, and PWM_MAX_PULSEWIDTH
- * are expressed in milliseconds and are used by the PWM-to-CCR
- * conversion macros.
+ * are expressed in milliseconds.
  *
  * PWM_US_MIN, PWM_US_NEUTRAL, MOTOR_MIN_START_US, and PWM_US_MAX
- * are expressed in microseconds. The microsecond values are used by
- * the register interface and by motor_control_set_pwm_us().
+ * are expressed in microseconds and define the valid ESC command range.
  *
- * Current pulse-width convention:
- *   1000 us = Minimum valid pulse width.
- *   1500 us = Neutral pulse width.
- *   1550 us = Defined minimum start pulse threshold.
- *   2000 us = Maximum valid pulse width.
+ * PWM conversion logic is implemented in motor_control.c.
  */
 #define PWM_MIN_PULSEWIDTH          1.0f
 #define PWM_ZERO_PULSEWIDTH         1.5f
@@ -107,93 +101,7 @@ extern TIM_HandleTypeDef htim3;
 #define PWM_US_MAX                  2000
 
 /* ============================================================
- * 6. PWM frequency and CCR conversion
- * ============================================================
- * PWM frequency and compare-register conversion helpers for TIM2.
- *
- * PWM_FREQUENCY is derived from TIM2_PER_MS. With the current TIM2
- * configuration, the resulting PWM frequency is approximately 50 Hz.
- *
- * Conversion flow:
- *   pulse_width_ms -> duty ratio -> TIM2 CCR value
- *
- * PWM_US_TO_CCR(us) is the preferred application-level conversion
- * macro. It clamps the input pulse width to the configured ESC range,
- * converts microseconds to milliseconds, and then converts the result
- * to a TIM2 CCR value.
- */
-#define PWM_FREQUENCY               \
-    (1.0f / TIM2_PER_MS * 1000.0f)
-
-#define PWM_PULSEWIDTH_TO_DUTYCYCLE(pulse_ms) \
-    ((pulse_ms) / 1000.0f * PWM_FREQUENCY)
-
-#define PWM_DUTYCYCLE_TO_CCR(duty)  \
-    ((uint32_t)((duty) * TIM2_CTR_PER))
-
-#define PWM_PULSEWIDTH_TO_CCR(pulse_ms) \
-    PWM_DUTYCYCLE_TO_CCR(PWM_PULSEWIDTH_TO_DUTYCYCLE(pulse_ms))
-
-#define PWM_US_TO_MS(us)            \
-    ((float)(us) / 1000.0f)
-
-#define PWM_US_CLAMP(us)            \
-    (((us) < PWM_US_MIN) ? PWM_US_MIN : (((us) > PWM_US_MAX) ? PWM_US_MAX : (us)))
-
-#define PWM_US_TO_CCR(us)           \
-    ((uint32_t)PWM_PULSEWIDTH_TO_CCR(PWM_US_TO_MS(PWM_US_CLAMP(us))))
-
-/* ============================================================
- * 7. Common PWM CCR values
- * ============================================================
- * CCR aliases for the configured minimum, neutral, and maximum PWM
- * pulse widths.
- *
- * These macros are not required by the current control flow, but they
- * are kept as convenient named constants for debugging or future use.
- */
-#define PWM_CCR_MIN                 \
-    PWM_PULSEWIDTH_TO_CCR(PWM_MIN_PULSEWIDTH)
-
-#define PWM_CCR_DEFAULT             \
-    PWM_PULSEWIDTH_TO_CCR(PWM_ZERO_PULSEWIDTH)
-
-#define PWM_CCR_MAX                 \
-    PWM_PULSEWIDTH_TO_CCR(PWM_MAX_PULSEWIDTH)
-
-/* ============================================================
- * 8. Hall speed measurement
- * ============================================================
- * Hall sensor speed-measurement constants and conversion macro.
- *
- * HALL_EDGES_PER_REV:
- *   Number of Hall capture edges per mechanical revolution.
- *
- * HALL_CAPTURE_TO_RPM(capture_value):
- *   Converts a TIM3 capture interval count to motor speed in RPM.
- *
- * Calculation:
- *   edge_interval_s = capture_value * (TIM3_PSC + 1) / CLK_FREQ
- *   edge_frequency  = 1 / edge_interval_s
- *   motor_rpm       = edge_frequency * 60 / HALL_EDGES_PER_REV
- */
-#define HALL_EDGES_PER_REV          12.0f
-
-#define HALL_CAPTURE_TO_RPM(capture_value) \
-    ((CLK_FREQ * 60.0f) / ((float)(capture_value) * (TIM3_PSC + 1) * HALL_EDGES_PER_REV))
-
-/*
- * RPM value derived from the maximum TIM3 counter period.
- *
- * The Hall sensor module currently uses this value as a startup
- * fallback when the first capture occurs while the stored RPM feedback
- * is still zero.
- */
-#define MIN_MOTOR_RPM               \
-    HALL_CAPTURE_TO_RPM(TIM3_CTR_PER)
-
-/* ============================================================
- * 9. RPM low-pass filter
+ * 6. RPM low-pass filter
  * ============================================================
  * First-order low-pass filter coefficient for RPM feedback.
  *

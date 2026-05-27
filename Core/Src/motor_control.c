@@ -11,6 +11,42 @@ volatile int16_t debug_pwm_us = PWM_US_NEUTRAL;
 volatile uint32_t debug_pwm_ccr = 0;
 
 /*
+ * Clamps a PWM pulse-width command to the valid ESC input range.
+ *
+ * This is motor-control logic, not application configuration, so it is kept
+ * in motor_control.c instead of app_config.h.
+ */
+static int16_t motor_control_clamp_pwm_us(int16_t pulse_us)
+{
+    if (pulse_us < PWM_US_MIN)
+    {
+        return PWM_US_MIN;
+    }
+
+    if (pulse_us > PWM_US_MAX)
+    {
+        return PWM_US_MAX;
+    }
+
+    return pulse_us;
+}
+
+/*
+ * Converts a clamped PWM pulse width in microseconds to a TIM2 CCR value.
+ *
+ * Conversion:
+ *   pulse_us -> pulse_ms -> duty ratio -> CCR
+ */
+static uint32_t motor_control_pwm_us_to_ccr_unchecked(int16_t pulse_us)
+{
+    float pulse_ms = (float)pulse_us / 1000.0f;
+    float pwm_frequency = 1000.0f / TIM2_PER_MS;
+    float duty = (pulse_ms / 1000.0f) * pwm_frequency;
+
+    return (uint32_t)(duty * TIM2_CTR_PER);
+}
+
+/*
  * Converts a PWM pulse width in microseconds to a TIM2 CCR value.
  *
  * The input is clamped to the configured valid PWM range before
@@ -18,8 +54,8 @@ volatile uint32_t debug_pwm_ccr = 0;
  */
 uint32_t motor_control_pwm_us_to_ccr(int16_t pulse_us)
 {
-    pulse_us = PWM_US_CLAMP(pulse_us);
-    return PWM_US_TO_CCR(pulse_us);
+    pulse_us = motor_control_clamp_pwm_us(pulse_us);
+    return motor_control_pwm_us_to_ccr_unchecked(pulse_us);
 }
 
 /*
@@ -31,9 +67,9 @@ uint32_t motor_control_pwm_us_to_ccr(int16_t pulse_us)
  */
 void motor_control_set_pwm_us(int16_t pulse_us)
 {
-    pulse_us = PWM_US_CLAMP(pulse_us);
+    pulse_us = motor_control_clamp_pwm_us(pulse_us);
 
-    uint32_t ccr = PWM_US_TO_CCR(pulse_us);
+    uint32_t ccr = motor_control_pwm_us_to_ccr_unchecked(pulse_us);
 
     __HAL_TIM_SET_COMPARE(&MOTOR_PWM_TIMER_HANDLE, MOTOR_PWM_CHANNEL, ccr);
 
@@ -133,6 +169,33 @@ const float integral_max = 100000.0f;
 const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;
 
 /*
+ * Writes a signed 16-bit motor command value to two consecutive
+ * little-endian registers.
+ */
+static void motor_control_write_reg_i16(uint32_t addr_l, int16_t value)
+{
+    uint16_t raw = (uint16_t)value;
+    uint8_t buf[2];
+
+    buf[0] = (uint8_t)(raw & 0xFF);
+    buf[1] = (uint8_t)((raw >> 8) & 0xFF);
+
+    (void)write_reg(addr_l, buf, 2);
+}
+
+/*
+ * Initializes motor-control-owned registers with safe default commands.
+ */
+static void motor_control_init_register_defaults(void)
+{
+    uint8_t mode = MOTOR_DEFAULT_MODE;
+
+    (void)write_reg(REG_MODE, &mode, 1);
+    motor_control_write_reg_i16(REG_PWM_US_L, MOTOR_DEFAULT_PWM_US);
+    motor_control_write_reg_i16(REG_TARGET_RPM_L, MOTOR_DEFAULT_TARGET_RPM);
+}
+
+/*
  * Initializes the motor-control module.
  *
  * The command state is reset to open-loop neutral output, and the PID
@@ -140,10 +203,12 @@ const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;
  */
 void motor_control_init(void)
 {
-    motor_mode = MOTOR_MODE_OPENLOOP_PWM;
-    target_pwm_us = PWM_US_NEUTRAL;
-    target_rpm = 0;
-    speed_setpoint = PWM_US_NEUTRAL;
+    motor_mode = MOTOR_DEFAULT_MODE;
+    target_pwm_us = MOTOR_DEFAULT_PWM_US;
+    target_rpm = MOTOR_DEFAULT_TARGET_RPM;
+    speed_setpoint = MOTOR_DEFAULT_PWM_US;
+
+    motor_control_init_register_defaults();
 
     pid_init(&motor_pid, kp, ki, kd, integral_max, pid_max);
 }

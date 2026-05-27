@@ -111,7 +111,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  user_loop();
+	/*
+	 * Background tasks can be placed here.
+	 * The periodic motor-control loop is called directly from the
+	 * control timer callback.
+	 */
   }
   /* USER CODE END 3 */
 }

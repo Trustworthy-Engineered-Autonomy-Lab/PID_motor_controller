@@ -48,20 +48,6 @@ typedef enum
 #define REG_MOTOR_MODE_PID_ACTIVE_BRAKE    1
 #define REG_MOTOR_MODE_PID_RPM             2
 
-/*
- * ============================================================
- * Default register values
- * ============================================================
- *
- * Default values loaded into the internal register buffer by reg_init().
- *
- * These defaults define the initial command state before the host writes
- * new values through the I2C register interface.
- */
-#define REG_DEFAULT_MODE                   REG_MOTOR_MODE_OPENLOOP_PWM
-#define REG_DEFAULT_PWM_US                 1500
-#define REG_DEFAULT_TARGET_RPM             0
-
 #ifdef __cplusplus
 }
 #endif

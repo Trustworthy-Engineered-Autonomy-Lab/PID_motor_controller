@@ -110,6 +110,17 @@ void motor_control_reset_pid(void);
  */
 void pid_pwm_update(float rpm_setpoint);
 
+/*
+ * Motor-control default command values.
+ *
+ * These defaults belong to the motor-control module because they define
+ * the initial motor-control command state stored in the register map.
+ * reg.c only provides register storage and access.
+ */
+#define MOTOR_DEFAULT_MODE        MOTOR_MODE_OPENLOOP_PWM
+#define MOTOR_DEFAULT_PWM_US      PWM_US_NEUTRAL
+#define MOTOR_DEFAULT_TARGET_RPM  0
+
 #ifdef __cplusplus
 }
 #endif

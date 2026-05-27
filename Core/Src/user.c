@@ -8,13 +8,6 @@
 
 
 /* Variable Declarations */
-/*
- * Control-loop update flag.
- *
- * The control timer callback sets this flag. The main loop clears it
- * after one control update has been processed.
- */
-volatile uint8_t control_update_flag = 0;
 
 /*
  * Local RPM low-pass filter instance used by the user application loop.
@@ -56,29 +49,24 @@ void user_init(void)
 }
 
 /*
- * Runs one iteration of the user application loop.
+ * Runs one control-loop update.
  *
- * When the control update flag is set, this function clears the flag,
+ * This function is called directly from the control timer callback. It
  * updates the RPM low-pass filter, synchronizes the RPM feedback
  * variables, increments the filter debug counter, and runs one
  * motor-control update.
  */
 void user_loop(void)
 {
-    if (control_update_flag == 1)
-    {
-        control_update_flag = 0;
+    lp_filter_compute(&rpm_lp_filter, latest_raw_rpm);
 
-        lp_filter_compute(&rpm_lp_filter, latest_raw_rpm);
+    motor_rpm_raw = rpm_lp_filter.input;
+    motor_rpm_filtered = rpm_lp_filter.output;
+    motor_rpm = rpm_lp_filter.output;
 
-        motor_rpm_raw = rpm_lp_filter.input;
-        motor_rpm_filtered = rpm_lp_filter.output;
-        motor_rpm = rpm_lp_filter.output;
+    debug_filter_update_count++;
 
-        debug_filter_update_count++;
-
-        motor_control_update();
-    }
+    motor_control_update();
 }
 
 /*
@@ -122,14 +110,14 @@ void tim_per_check(void){
 /*
  * Handles timer period-elapsed callbacks.
  *
- * The control timer sets the control update flag. The Hall timer calls
- * the Hall sensor timeout handler for no-edge detection.
+ * The control timer directly runs one user control-loop update. The Hall
+ * timer calls the Hall sensor timeout handler for no-edge detection.
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == CONTROL_TIMER_HANDLE.Instance)
     {
-        control_update_flag = 1;
+        user_loop();
     }
 
     if (htim->Instance == HALL_TIMER_HANDLE.Instance)

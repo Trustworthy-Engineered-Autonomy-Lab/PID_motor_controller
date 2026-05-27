@@ -3,6 +3,44 @@
 #include "app_config.h"
 
 /*
+ * Number of Hall capture edges per mechanical revolution.
+ *
+ * This value belongs to the Hall sensor module because it is used only by
+ * the Hall capture-to-RPM conversion logic.
+ */
+#define HALL_SENSOR_EDGES_PER_REV    12.0f
+
+/*
+ * Converts a TIM3 Hall capture interval count to motor speed in RPM.
+ *
+ * Calculation:
+ *   edge_interval_s = capture_value * (TIM3_PSC + 1) / CLK_FREQ
+ *   edge_frequency  = 1 / edge_interval_s
+ *   motor_rpm       = edge_frequency * 60 / HALL_SENSOR_EDGES_PER_REV
+ */
+static float hall_sensor_capture_to_rpm(uint32_t capture_value)
+{
+    if (capture_value == 0U)
+    {
+        return 0.0f;
+    }
+
+    return (CLK_FREQ * 60.0f) /
+           ((float)capture_value * (TIM3_PSC + 1U) * HALL_SENSOR_EDGES_PER_REV);
+}
+
+/*
+ * Returns the RPM value corresponding to the maximum TIM3 capture period.
+ *
+ * This is used as a startup fallback when the first Hall capture occurs
+ * while RPM feedback is still zero.
+ */
+static float hall_sensor_min_motor_rpm(void)
+{
+    return hall_sensor_capture_to_rpm(TIM3_CTR_PER);
+}
+
+/*
  * Indicates whether at least one Hall edge has been captured since the
  * previous TIM3 period-elapsed event.
  *
@@ -105,16 +143,11 @@ void hall_sensor_capture_handler(uint32_t capture_value)
 
     if (motor_rpm_raw > 0.0f || motor_rpm_filtered > 0.0f)
     {
-        raw_rpm_now = HALL_CAPTURE_TO_RPM(hall_capture_value);
+        raw_rpm_now = hall_sensor_capture_to_rpm(hall_capture_value);
     }
     else
     {
-        /*
-         * Use the configured minimum measurable RPM as a startup fallback
-         * when the motor transitions from zero feedback to the first Hall
-         * capture event.
-         */
-        raw_rpm_now = MIN_MOTOR_RPM;
+        raw_rpm_now = hall_sensor_min_motor_rpm();
     }
 
     /*
