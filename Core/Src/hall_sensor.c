@@ -1,17 +1,32 @@
 #include "hall_sensor.h"
 #include "app_config.h"
 
-/*
- * These RPM feedback variables are defined in motor_control.c.
- * hall_sensor.c only uses them to update or clear RPM feedback.
- *
- * Local extern declarations avoid adding an unnecessary dependency on
- * lp_filter.h or introducing another shared header.
- */
-extern volatile float motor_rpm_raw;
-extern volatile float motor_rpm_filtered;
-extern volatile float motor_rpm;
-extern volatile float latest_raw_rpm;
+static volatile float latest_raw_rpm = 0.0f;
+
+static volatile uint32_t hall_capture_value = 0;
+static volatile uint32_t debug_hall_capture_prev = 0;
+static volatile uint32_t debug_hall_capture_delta = 0;
+static volatile uint32_t debug_hall_capture_spike_count = 0;
+
+float hall_sensor_get_raw_rpm(void)
+{
+    return latest_raw_rpm;
+}
+
+uint32_t hall_sensor_get_capture_value(void)
+{
+    return hall_capture_value;
+}
+
+uint32_t hall_sensor_get_capture_delta(void)
+{
+    return debug_hall_capture_delta;
+}
+
+uint32_t hall_sensor_get_capture_spike_count(void)
+{
+    return debug_hall_capture_spike_count;
+}
 
 /*
  * Number of Hall capture edges per mechanical revolution.
@@ -59,35 +74,6 @@ static float hall_sensor_min_motor_rpm(void)
  * activity and a no-edge timeout condition.
  */
 static volatile uint8_t hall_edge_seen_since_timeout = 0;
-
-/*
- * Latest TIM3 Hall capture count used for RPM conversion.
- *
- * In the current configuration, the capture value is treated as the
- * timer-count interval associated with the latest Hall edge.
- */
-volatile uint32_t hall_capture_value = 0;
-
-/*
- * Hall sensor update timestamp placeholder.
- *
- * This variable is currently defined for external access, but this
- * module does not update it.
- */
-volatile uint32_t last_hall_sensor_update = 0;
-
-/*
- * Debug variables for detecting large Hall capture-value changes.
- *
- * debug_hall_capture_prev stores the previous capture value.
- * debug_hall_capture_delta stores the absolute difference between the
- * current and previous capture values.
- * debug_hall_capture_spike_count counts capture values that are much
- * smaller or larger than the previous value.
- */
-volatile uint32_t debug_hall_capture_prev = 0;
-volatile uint32_t debug_hall_capture_delta = 0;
-volatile uint32_t debug_hall_capture_spike_count = 0;
 
 /*
  * Initializes the Hall sensor module.
@@ -151,21 +137,15 @@ void hall_capture_spike_check(uint32_t capture_value)
  */
 void hall_sensor_capture_handler(uint32_t capture_value)
 {
-	hall_edge_seen_since_timeout = 1;
+    hall_edge_seen_since_timeout = 1;
 
-    /*
-     * Store the latest capture value for RPM conversion and debugging.
-     */
     hall_capture_value = capture_value;
 
-    /*
-     * Update debug-only capture-jump statistics.
-     */
     hall_capture_spike_check(hall_capture_value);
 
     float raw_rpm_now;
 
-    if (motor_rpm_raw > 0.0f || motor_rpm_filtered > 0.0f)
+    if (latest_raw_rpm > 0.0f)
     {
         raw_rpm_now = hall_sensor_capture_to_rpm(hall_capture_value);
     }
@@ -174,12 +154,7 @@ void hall_sensor_capture_handler(uint32_t capture_value)
         raw_rpm_now = hall_sensor_min_motor_rpm();
     }
 
-    /*
-     * Store the latest raw RPM. The filter update is handled by the
-     * control loop rather than by this interrupt-side capture handler.
-     */
     latest_raw_rpm = raw_rpm_now;
-    motor_rpm_raw = raw_rpm_now;
 }
 
 /*
@@ -196,18 +171,8 @@ void hall_sensor_timeout_handler(void)
 {
     if (hall_edge_seen_since_timeout == 0)
     {
-        /*
-         * No Hall edge was captured during this timeout window. Clear all
-         * RPM feedback values so the control loop sees the motor as stopped.
-         */
         latest_raw_rpm = 0.0f;
-        motor_rpm_raw = 0.0f;
-        motor_rpm_filtered = 0.0f;
-        motor_rpm = 0.0f;
     }
 
-    /*
-     * Start a new Hall edge detection window after each TIM3 period.
-     */
     hall_edge_seen_since_timeout = 0;
 }

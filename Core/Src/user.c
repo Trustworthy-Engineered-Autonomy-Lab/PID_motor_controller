@@ -13,6 +13,10 @@
  * Local RPM low-pass filter instance used by the user application loop.
  */
 static LP_Filter_t rpm_lp_filter;
+
+volatile float motor_rpm_raw = 0.0f;
+volatile float motor_rpm_filtered = 0.0f;
+volatile uint32_t debug_filter_update_count = 0;
 /* End Variable Definitions */
 
 
@@ -53,15 +57,16 @@ void user_init(void)
  */
 void user_loop(void)
 {
-    lp_filter_compute(&rpm_lp_filter, latest_raw_rpm);
+    float raw_rpm = hall_sensor_get_raw_rpm();
+
+    lp_filter_compute(&rpm_lp_filter, raw_rpm);
 
     motor_rpm_raw = rpm_lp_filter.input;
     motor_rpm_filtered = rpm_lp_filter.output;
-    motor_rpm = rpm_lp_filter.output;
 
     debug_filter_update_count++;
 
-    motor_control_update();
+    motor_control_update(motor_rpm_filtered);
 }
 
 /*

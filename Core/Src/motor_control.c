@@ -2,7 +2,6 @@
 #include "app_config.h"
 #include "reg.h"
 #include "pid.h"
-#include "lp_filter.h"
 
 /*
  * PWM output debug values.
@@ -80,7 +79,8 @@ void motor_control_set_pwm_us(int16_t pulse_us)
 /*
  * PID controller instance used by the motor-control module.
  */
-PID_t motor_pid;
+static PID_t motor_pid;
+static void pid_pwm_update(float rpm_setpoint_input, float feedback_rpm);
 
 /*
  * PID update debug values.
@@ -99,27 +99,10 @@ volatile float debug_pid_error = 0.0f;
  * in PID modes. The current control logic uses target_pwm_us and
  * target_rpm directly.
  */
-volatile uint8_t motor_mode = MOTOR_MODE_OPENLOOP_PWM;
-volatile int16_t target_pwm_us = PWM_US_NEUTRAL;
-volatile int16_t target_rpm = 0;
-volatile int16_t speed_setpoint = PWM_US_NEUTRAL;
-
-/*
- * Raw RPM feedback value.
- *
- * This value is updated by the Hall sensor path and by the control-loop
- * filter synchronization logic.
- */
-volatile float motor_rpm_raw = 0.0f;
-
-/*
- * Filtered RPM feedback value.
- *
- * This value is produced by the RPM low-pass filter in the control loop.
- * The Hall timeout handler may also clear it when no Hall edge is
- * detected during a timeout window.
- */
-volatile float motor_rpm_filtered = 0.0f;
+static volatile uint8_t motor_mode = MOTOR_MODE_OPENLOOP_PWM;
+static volatile int16_t target_pwm_us = PWM_US_NEUTRAL;
+static volatile int16_t target_rpm = 0;
+static volatile int16_t speed_setpoint = PWM_US_NEUTRAL;
 
 /*
  * Backward-compatible RPM feedback variable.
@@ -138,14 +121,6 @@ volatile float motor_rpm = 0.0f;
 volatile float latest_raw_rpm = 0.0f;
 
 /*
- * RPM filter update debug counter.
- *
- * This counter is incremented each time the control loop computes one
- * RPM filter update.
- */
-volatile uint32_t debug_filter_update_count = 0;
-
-/*
  * Latest RPM setpoint passed to pid_pwm_update().
  *
  * This variable is internal to this module and mirrors the function
@@ -161,12 +136,12 @@ static volatile float rpm_setpoint = 0.0f;
  * integral_max limits the accumulated PID error.
  * pid_max limits the PID output around the neutral PWM pulse width.
  */
-const float dt = TIM1_PER_MS / 1000.0f;
-const float kp = 0.00002f;
-const float ki = 0.00003f;
-const float kd = 0.0f;
-const float integral_max = 100000.0f;
-const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;
+static const float dt = TIM1_PER_MS / 1000.0f;
+static const float kp = 0.00002f;
+static const float ki = 0.00003f;
+static const float kd = 0.0f;
+static const float integral_max = 100000.0f;
+static const float pid_max = PWM_MAX_PULSEWIDTH - PWM_ZERO_PULSEWIDTH;
 
 /*
  * Writes a signed 16-bit motor command value to two consecutive
@@ -294,7 +269,7 @@ static void motor_control_read_registers(void)
  * The function first refreshes the local command state from the register
  * buffer, then applies the selected control mode.
  */
-void motor_control_update(void)
+void motor_control_update(float feedback_rpm)
 {
     motor_control_read_registers();
 
@@ -308,13 +283,13 @@ void motor_control_update(void)
 
         case MOTOR_MODE_PID_ACTIVE_BRAKE:
         {
-            pid_pwm_update((float)target_rpm);
+            pid_pwm_update((float)target_rpm, feedback_rpm);
             break;
         }
 
         case MOTOR_MODE_PID_RPM:
         {
-            pid_pwm_update((float)target_rpm);
+            pid_pwm_update((float)target_rpm, feedback_rpm);
             break;
         }
 
@@ -340,86 +315,74 @@ void motor_control_update(void)
  * the current RPM feedback. In the non-braking PID mode, it outputs the
  * neutral pulse width.
  */
-void pid_pwm_update(float rpm_setpoint_input)
+static void pid_pwm_update(float rpm_setpoint_input, float feedback_rpm)
 {
-	rpm_setpoint = rpm_setpoint_input;
-	if (rpm_setpoint <= 0.0f) {
+    rpm_setpoint = rpm_setpoint_input;
 
-	    pid_reset(&motor_pid);
+    if (rpm_setpoint <= 0.0f)
+    {
+        pid_reset(&motor_pid);
 
-	    float feedback_rpm = motor_rpm;
-	    int16_t pulse_us;
+        int16_t pulse_us;
 
-	    /*
-	     * Active-brake stop behavior.
-	     *
-	     * Braking is enabled when the feedback RPM rises above the brake-on
-	     * threshold and disabled when it falls below the brake-off threshold.
-	     */
-	    if (motor_mode == MOTOR_MODE_PID_ACTIVE_BRAKE) {
+        if (motor_mode == MOTOR_MODE_PID_ACTIVE_BRAKE)
+        {
+            static uint8_t brake_active = 0;
 
-	        static uint8_t brake_active = 0;
+            if (brake_active == 0)
+            {
+                if (feedback_rpm > MOTOR_BRAKE_ON_RPM)
+                {
+                    brake_active = 1;
+                }
+            }
+            else
+            {
+                if (feedback_rpm < MOTOR_BRAKE_OFF_RPM)
+                {
+                    brake_active = 0;
+                }
+            }
 
-	        if (brake_active == 0) {
-	            if (feedback_rpm > MOTOR_BRAKE_ON_RPM) {
-	                brake_active = 1;
-	            }
-	        } else {
-	            if (feedback_rpm < MOTOR_BRAKE_OFF_RPM) {
-	                brake_active = 0;
-	            }
-	        }
+            if (brake_active)
+            {
+                pulse_us = MOTOR_BRAKE_PWM_US;
+            }
+            else
+            {
+                pulse_us = PWM_US_NEUTRAL;
+            }
+        }
+        else
+        {
+            pulse_us = PWM_US_NEUTRAL;
+        }
 
-	        if (brake_active) {
-	            pulse_us = MOTOR_BRAKE_PWM_US;
-	        } else {
-	            pulse_us = PWM_US_NEUTRAL;
-	        }
-	    }
+        motor_control_set_pwm_us(pulse_us);
 
-	    /*
-	     * Non-braking stop behavior.
-	     *
-	     * The PWM output is set to neutral so the motor can coast down
-	     * without an active braking pulse.
-	     */
-	    else {
-	        pulse_us = PWM_US_NEUTRAL;
-	    }
+        debug_motor_rpm = feedback_rpm;
+        debug_pid_output = 0.0f;
+        debug_pid_error = 0.0f;
 
-	    motor_control_set_pwm_us(pulse_us);
+        return;
+    }
 
-	    debug_motor_rpm = feedback_rpm;
-	    debug_pid_output = 0.0f;
-	    debug_pid_error = 0.0f;
+    pid_compute(&motor_pid, rpm_setpoint, feedback_rpm, dt);
 
-	    return;
-	}
+    debug_motor_rpm = feedback_rpm;
+    debug_pid_output = motor_pid.output;
+    debug_pid_error = rpm_setpoint - feedback_rpm;
 
-	/*
-	 * Compute the PID output. motor_pid.output is the pulse-width
-	 * correction relative to the neutral PWM pulse width.
-	 */
-	float feedback_rpm = motor_rpm;
-	pid_compute(&motor_pid, rpm_setpoint, feedback_rpm, dt);
-	debug_motor_rpm = feedback_rpm;
-	debug_pid_output = motor_pid.output;
-	debug_pid_error = rpm_setpoint - feedback_rpm;
+    float pulse_width = PWM_ZERO_PULSEWIDTH + motor_pid.output;
 
-	/*
-	 * Convert the PID correction to an actual PWM pulse width.
-	 */
-	float pulse_width = PWM_ZERO_PULSEWIDTH + motor_pid.output;
+    if (pulse_width < PWM_ZERO_PULSEWIDTH)
+    {
+        pulse_width = PWM_ZERO_PULSEWIDTH;
+    }
+    else if (pulse_width > PWM_MAX_PULSEWIDTH)
+    {
+        pulse_width = PWM_MAX_PULSEWIDTH;
+    }
 
-	/*
-	 * This project currently does not implement reverse motor control.
-	 * Any PID result below the neutral pulse width is limited to neutral.
-	 */
-	if (pulse_width < PWM_ZERO_PULSEWIDTH) {
-	    pulse_width = PWM_ZERO_PULSEWIDTH;
-	} else if (pulse_width > PWM_MAX_PULSEWIDTH) {
-	    pulse_width = PWM_MAX_PULSEWIDTH;
-	}
-
-	motor_control_set_pwm_us((int16_t)(pulse_width * 1000.0f));
+    motor_control_set_pwm_us((int16_t)(pulse_width * 1000.0f));
 }

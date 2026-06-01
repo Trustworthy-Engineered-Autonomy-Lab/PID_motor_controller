@@ -7,34 +7,6 @@ extern "C" {
 
 #include <stdint.h>
 
-/*
- * Latest TIM3 Hall capture count used for RPM conversion.
- *
- * This value is updated by hall_sensor_capture_handler(), which is
- * called from the input-capture callback path.
- */
-extern volatile uint32_t hall_capture_value;
-
-/*
- * Hall sensor update timestamp variable.
- *
- * This variable is currently declared and defined for external access,
- * but the current Hall sensor implementation does not update it.
- */
-extern volatile uint32_t last_hall_sensor_update;
-
-/*
- * Debug variables used to monitor large changes in Hall capture values.
- *
- * debug_hall_capture_prev stores the previous capture value.
- * debug_hall_capture_delta stores the absolute difference between the
- * current and previous capture values.
- * debug_hall_capture_spike_count counts large capture-value jumps.
- */
-extern volatile uint32_t debug_hall_capture_prev;
-extern volatile uint32_t debug_hall_capture_delta;
-extern volatile uint32_t debug_hall_capture_spike_count;
-
 void hall_sensor_init(void);
 
 /*
@@ -62,6 +34,11 @@ void hall_sensor_capture_handler(uint32_t capture_value);
  * timeout logic.
  */
 void hall_sensor_timeout_handler(void);
+
+float hall_sensor_get_raw_rpm(void);
+uint32_t hall_sensor_get_capture_value(void);
+uint32_t hall_sensor_get_capture_delta(void);
+uint32_t hall_sensor_get_capture_spike_count(void);
 
 #ifdef __cplusplus
 }

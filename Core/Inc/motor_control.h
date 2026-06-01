@@ -89,7 +89,7 @@ void motor_control_init(void);
  * In the current project, user_loop() calls this function when the
  * control update flag is set by the control timer.
  */
-void motor_control_update(void);
+void motor_control_update(float feedback_rpm);
 
 /*
  * Resets the motor PID controller state.
@@ -99,16 +99,6 @@ void motor_control_update(void);
  * directly.
  */
 void motor_control_reset_pid(void);
-
-/*
- * Updates the PWM command for PID-based RPM control.
- *
- * For positive RPM setpoints, this function computes the PID correction
- * from the current RPM feedback and applies the resulting PWM command.
- * For zero or negative RPM setpoints, it resets the PID controller and
- * applies the stop behavior selected by the current motor mode.
- */
-void pid_pwm_update(float rpm_setpoint);
 
 /*
  * Motor-control default command values.

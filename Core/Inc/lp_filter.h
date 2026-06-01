@@ -28,50 +28,6 @@ typedef struct
 } LP_Filter_t;
 
 /*
- * Raw RPM value used by the motor-control feedback path.
- *
- * In the current project, this value is assigned from the filter input
- * in user_loop(). The Hall sensor module may also clear or update it
- * when capture or timeout events occur.
- */
-extern volatile float motor_rpm_raw;
-
-/*
- * Filtered RPM value used for monitoring and feedback.
- *
- * In the current project, this value is assigned from the filter output
- * in user_loop(). The Hall sensor timeout handler may clear it when no
- * Hall edge is detected during a timeout period.
- */
-extern volatile float motor_rpm_filtered;
-
-/*
- * Backward-compatible RPM feedback variable.
- *
- * In the current project, user_loop() keeps this value synchronized with
- * motor_rpm_filtered, and the motor-control module uses it as the RPM
- * feedback value.
- */
-extern volatile float motor_rpm;
-
-/*
- * Latest raw RPM value produced by the Hall sensor capture path.
- *
- * The Hall sensor capture handler writes this value. The control loop in
- * user_loop() passes it into lp_filter_compute() when the control update
- * flag is set.
- */
-extern volatile float latest_raw_rpm;
-
-/*
- * Debug counter for RPM filter updates.
- *
- * This counter is incremented in user_loop() each time the RPM filter is
- * computed during a control update.
- */
-extern volatile uint32_t debug_filter_update_count;
-
-/*
  * Initializes a first-order low-pass filter instance.
  *
  * If the filter pointer is null, the function returns without changing
