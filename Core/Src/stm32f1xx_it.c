@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f1xx_it.h"
+#include "reg.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
@@ -46,7 +47,8 @@
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+extern void i2c_ll_stop_detected(void);
+extern void i2c_ll_rx_byte(uint8_t data);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -55,7 +57,6 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern I2C_HandleTypeDef hi2c1;
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN EV */
@@ -233,10 +234,37 @@ void TIM3_IRQHandler(void)
   */
 void I2C1_EV_IRQHandler(void)
 {
-  /* USER CODE BEGIN I2C1_EV_IRQn 0 */
+	/* USER CODE BEGIN I2C1_EV_IRQn 0 */
+    /*
+     * Address matched. Clear the ADDR flag and reset the temporary
+     * receive buffer for a new I2C slave write transaction.
+     */
+	if (LL_I2C_IsActiveFlag_ADDR(I2C1))
+    {
+	    LL_I2C_ClearFlag_ADDR(I2C1);
+	    i2c_ll_reset_rx();
+	}
 
+    /*
+     * One byte has been received. Read it from the I2C data register and
+     * forward it to the register-module receive buffer.
+     */
+	if (LL_I2C_IsActiveFlag_RXNE(I2C1))
+	{
+	    uint8_t data = LL_I2C_ReceiveData8(I2C1);
+	    i2c_ll_rx_byte(data);
+	}
+
+    /*
+     * Stop condition detected. Clear the STOP flag and commit the
+     * completed receive frame to the register module.
+     */
+	if (LL_I2C_IsActiveFlag_STOP(I2C1))
+    {
+	    LL_I2C_ClearFlag_STOP(I2C1);
+	    i2c_ll_stop_detected();
+    }
   /* USER CODE END I2C1_EV_IRQn 0 */
-  HAL_I2C_EV_IRQHandler(&hi2c1);
   /* USER CODE BEGIN I2C1_EV_IRQn 1 */
 
   /* USER CODE END I2C1_EV_IRQn 1 */
@@ -247,10 +275,42 @@ void I2C1_EV_IRQHandler(void)
   */
 void I2C1_ER_IRQHandler(void)
 {
-  /* USER CODE BEGIN I2C1_ER_IRQn 0 */
+	/* USER CODE BEGIN I2C1_ER_IRQn 0 */
+    /*
+     * BERR: Bus error.
+	 */
+	if (LL_I2C_IsActiveFlag_BERR(I2C1))
+    {
+	    LL_I2C_ClearFlag_BERR(I2C1);
+	}
 
+    /*
+	 * ARLO: Arbitration lost.
+	 */
+	if (LL_I2C_IsActiveFlag_ARLO(I2C1))
+	{
+	    LL_I2C_ClearFlag_ARLO(I2C1);
+	}
+
+    /*
+	 * AF: Acknowledge failure.
+	 *
+	 * In I2C slave mode, this flag may be set when the master ends a
+     * transfer or does not acknowledge a byte.
+	 */
+	if (LL_I2C_IsActiveFlag_AF(I2C1))
+	{
+	    LL_I2C_ClearFlag_AF(I2C1);
+	}
+
+    /*
+	 * OVR: Overrun or underrun.
+	 */
+	if (LL_I2C_IsActiveFlag_OVR(I2C1))
+	{
+	    LL_I2C_ClearFlag_OVR(I2C1);
+	}
   /* USER CODE END I2C1_ER_IRQn 0 */
-  HAL_I2C_ER_IRQHandler(&hi2c1);
   /* USER CODE BEGIN I2C1_ER_IRQn 1 */
 
   /* USER CODE END I2C1_ER_IRQn 1 */

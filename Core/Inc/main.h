@@ -28,10 +28,21 @@ extern "C" {
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
+#include "stm32f1xx_ll_i2c.h"
+#include "stm32f1xx_ll_bus.h"
+#include "stm32f1xx_ll_cortex.h"
+#include "stm32f1xx_ll_rcc.h"
+#include "stm32f1xx_ll_system.h"
+#include "stm32f1xx_ll_utils.h"
+#include "stm32f1xx_ll_pwr.h"
+#include "stm32f1xx_ll_gpio.h"
+#include "stm32f1xx_ll_dma.h"
+
+#include "stm32f1xx_ll_exti.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "user.h"
+
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -59,11 +70,11 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define TIM1_PSC 99
-#define TIM1_CTR_PER 10799
+#define TIM1_CTR_PER 7199
 #define TIM2_PSC 99
 #define TIM2_CTR_PER 14399
 #define TIM3_PSC 219
+#define TIM1_PSC 99
 #define TIM3_CTR_PER 65535
 #define LED_Green_Pin GPIO_PIN_13
 #define LED_Green_GPIO_Port GPIOC
