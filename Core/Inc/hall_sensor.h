@@ -35,6 +35,8 @@ extern volatile uint32_t debug_hall_capture_prev;
 extern volatile uint32_t debug_hall_capture_delta;
 extern volatile uint32_t debug_hall_capture_spike_count;
 
+void hall_sensor_init(void);
+
 /*
  * Updates Hall capture spike debug variables.
  *

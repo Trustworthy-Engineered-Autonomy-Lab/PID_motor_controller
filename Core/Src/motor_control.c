@@ -198,8 +198,9 @@ static void motor_control_init_register_defaults(void)
 /*
  * Initializes the motor-control module.
  *
- * The command state is reset to open-loop neutral output, and the PID
- * controller is initialized with the configured gains and limits.
+ * The command state is reset to open-loop neutral output, the motor-control
+ * registers are initialized with safe defaults, the PID controller is
+ * initialized, and the motor PWM output is started at the default pulse width.
  */
 void motor_control_init(void)
 {
@@ -211,6 +212,9 @@ void motor_control_init(void)
     motor_control_init_register_defaults();
 
     pid_init(&motor_pid, kp, ki, kd, integral_max, pid_max);
+
+    HAL_TIM_PWM_Start(&MOTOR_PWM_TIMER_HANDLE, MOTOR_PWM_CHANNEL);
+    motor_control_set_pwm_us(MOTOR_DEFAULT_PWM_US);
 }
 
 /*

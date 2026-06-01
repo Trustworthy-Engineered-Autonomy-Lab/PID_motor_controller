@@ -1,6 +1,17 @@
 #include "hall_sensor.h"
-#include "lp_filter.h"
 #include "app_config.h"
+
+/*
+ * These RPM feedback variables are defined in motor_control.c.
+ * hall_sensor.c only uses them to update or clear RPM feedback.
+ *
+ * Local extern declarations avoid adding an unnecessary dependency on
+ * lp_filter.h or introducing another shared header.
+ */
+extern volatile float motor_rpm_raw;
+extern volatile float motor_rpm_filtered;
+extern volatile float motor_rpm;
+extern volatile float latest_raw_rpm;
 
 /*
  * Number of Hall capture edges per mechanical revolution.
@@ -77,6 +88,19 @@ volatile uint32_t last_hall_sensor_update = 0;
 volatile uint32_t debug_hall_capture_prev = 0;
 volatile uint32_t debug_hall_capture_delta = 0;
 volatile uint32_t debug_hall_capture_spike_count = 0;
+
+/*
+ * Initializes the Hall sensor module.
+ *
+ * This starts the Hall input-capture interrupt and the Hall timer base
+ * interrupt. The input-capture interrupt is used to measure motor speed,
+ * while the base interrupt is used for no-edge timeout detection.
+ */
+void hall_sensor_init(void)
+{
+    HAL_TIMEx_HallSensor_Start_IT(&HALL_TIMER_HANDLE);
+    HAL_TIM_Base_Start_IT(&HALL_TIMER_HANDLE);
+}
 
 /*
  * Updates Hall capture spike debug data.

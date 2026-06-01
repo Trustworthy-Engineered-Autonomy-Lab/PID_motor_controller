@@ -27,9 +27,8 @@ void user_error_handler(uint8_t count);
 /*
  * Initializes the user application layer.
  *
- * This function initializes the register interface, RPM filter, and
- * motor-control module. It then starts the ESC PWM output, the Hall
- * sensor capture/timeout timers, and the control-loop timer.
+ * This function initializes the register interface, RPM filter,
+ * motor-control module, Hall sensor module, and control-loop timer.
  */
 void user_init(void)
 {
@@ -39,11 +38,7 @@ void user_init(void)
 
     motor_control_init();
 
-    HAL_TIM_PWM_Start(&MOTOR_PWM_TIMER_HANDLE, MOTOR_PWM_CHANNEL);
-    motor_control_set_pwm_us(PWM_US_NEUTRAL);
-
-    HAL_TIMEx_HallSensor_Start_IT(&HALL_TIMER_HANDLE);
-    HAL_TIM_Base_Start_IT(&HALL_TIMER_HANDLE);
+    hall_sensor_init();
 
     HAL_TIM_Base_Start_IT(&CONTROL_TIMER_HANDLE);
 }
