@@ -1,0 +1,11 @@
+../Core/Src/motor_control.c:18:16:motor_control_clamp_pwm_us	3
+../Core/Src/motor_control.c:39:17:motor_control_pwm_us_to_ccr_unchecked	1
+../Core/Src/motor_control.c:54:10:motor_control_pwm_us_to_ccr	1
+../Core/Src/motor_control.c:67:6:motor_control_set_pwm_us	1
+../Core/Src/motor_control.c:150:13:motor_control_write_reg_i16	1
+../Core/Src/motor_control.c:164:13:motor_control_init_register_defaults	1
+../Core/Src/motor_control.c:180:6:motor_control_init	1
+../Core/Src/motor_control.c:201:6:motor_control_reset_pid	1
+../Core/Src/motor_control.c:212:13:motor_control_read_registers	10
+../Core/Src/motor_control.c:272:6:motor_control_update	5
+../Core/Src/motor_control.c:318:13:pid_pwm_update	9

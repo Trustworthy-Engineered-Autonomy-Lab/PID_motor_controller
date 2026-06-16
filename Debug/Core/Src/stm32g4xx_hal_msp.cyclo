@@ -1,0 +1,6 @@
+../Core/Src/stm32g4xx_hal_msp.c:64:6:HAL_MspInit	1
+../Core/Src/stm32g4xx_hal_msp.c:91:6:HAL_TIM_Base_MspInit	3
+../Core/Src/stm32g4xx_hal_msp.c:124:6:HAL_TIMEx_HallSensor_MspInit	2
+../Core/Src/stm32g4xx_hal_msp.c:156:6:HAL_TIM_MspPostInit	2
+../Core/Src/stm32g4xx_hal_msp.c:188:6:HAL_TIM_Base_MspDeInit	3
+../Core/Src/stm32g4xx_hal_msp.c:221:6:HAL_TIMEx_HallSensor_MspDeInit	2

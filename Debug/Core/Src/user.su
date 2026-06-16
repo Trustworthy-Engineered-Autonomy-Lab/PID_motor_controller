@@ -1,0 +1,6 @@
+../Core/Src/user.c:38:6:user_init	8	static
+../Core/Src/user.c:59:6:user_loop	16	static
+../Core/Src/user.c:83:6:tim_per_check	4	static
+../Core/Src/user.c:118:6:HAL_TIM_PeriodElapsedCallback	16	static
+../Core/Src/user.c:138:6:HAL_TIM_IC_CaptureCallback	24	static
+../Core/Src/user.c:161:6:user_error_handler	32	static,ignoring_inline_asm

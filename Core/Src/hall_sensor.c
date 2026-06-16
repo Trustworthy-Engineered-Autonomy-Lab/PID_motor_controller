@@ -37,10 +37,10 @@ uint32_t hall_sensor_get_capture_spike_count(void)
 #define HALL_SENSOR_EDGES_PER_REV    12.0f
 
 /*
- * Converts a TIM3 Hall capture interval count to motor speed in RPM.
+ * Converts a TIM4 Hall capture interval count to motor speed in RPM.
  *
  * Calculation:
- *   edge_interval_s = capture_value * (TIM3_PSC + 1) / CLK_FREQ
+ *   edge_interval_s = capture_value * (TIM4_PSC + 1) / CLK_FREQ
  *   edge_frequency  = 1 / edge_interval_s
  *   motor_rpm       = edge_frequency * 60 / HALL_SENSOR_EDGES_PER_REV
  */
@@ -52,23 +52,23 @@ static float hall_sensor_capture_to_rpm(uint32_t capture_value)
     }
 
     return (CLK_FREQ * 60.0f) /
-           ((float)capture_value * (TIM3_PSC + 1U) * HALL_SENSOR_EDGES_PER_REV);
+           ((float)capture_value * (TIM4_PSC + 1U) * HALL_SENSOR_EDGES_PER_REV);
 }
 
 /*
- * Returns the RPM value corresponding to the maximum TIM3 capture period.
+ * Returns the RPM value corresponding to the maximum TIM4 capture period.
  *
  * This is used as a startup fallback when the first Hall capture occurs
  * while RPM feedback is still zero.
  */
 static float hall_sensor_min_motor_rpm(void)
 {
-    return hall_sensor_capture_to_rpm(TIM3_CTR_PER);
+    return hall_sensor_capture_to_rpm(TIM4_CTR_PER);
 }
 
 /*
  * Indicates whether at least one Hall edge has been captured since the
- * previous TIM3 period-elapsed event.
+ * previous TIM4 period-elapsed event.
  *
  * The timeout handler uses this flag to distinguish between normal Hall
  * activity and a no-edge timeout condition.
@@ -125,9 +125,9 @@ void hall_capture_spike_check(uint32_t capture_value)
 }
 
 /*
- * Handles one TIM3 Hall input-capture event.
+ * Handles one TIM4 Hall input-capture event.
  *
- * The caller provides the captured TIM3 count value. This function stores
+ * The caller provides the captured TIM4 count value. This function stores
  * the latest capture value, updates capture-jump debug data, converts the
  * capture value to a raw RPM estimate when valid previous RPM feedback is
  * available, and stores the latest raw RPM for the control-loop filter.
@@ -158,9 +158,9 @@ void hall_sensor_capture_handler(uint32_t capture_value)
 }
 
 /*
- * Handles one TIM3 period-elapsed event for Hall no-edge detection.
+ * Handles one TIM4 period-elapsed event for Hall no-edge detection.
  *
- * If no Hall edge has been captured during the latest TIM3 period, the
+ * If no Hall edge has been captured during the latest TIM4 period, the
  * motor RPM feedback values are cleared. Otherwise, the captured edge is
  * treated as valid activity and the RPM values are left unchanged.
  *

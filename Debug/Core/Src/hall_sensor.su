@@ -1,0 +1,10 @@
+../Core/Src/hall_sensor.c:11:7:hall_sensor_get_raw_rpm	4	static
+../Core/Src/hall_sensor.c:16:10:hall_sensor_get_capture_value	4	static
+../Core/Src/hall_sensor.c:21:10:hall_sensor_get_capture_delta	4	static
+../Core/Src/hall_sensor.c:26:10:hall_sensor_get_capture_spike_count	4	static
+../Core/Src/hall_sensor.c:47:14:hall_sensor_capture_to_rpm	16	static
+../Core/Src/hall_sensor.c:64:14:hall_sensor_min_motor_rpm	8	static
+../Core/Src/hall_sensor.c:85:6:hall_sensor_init	8	static
+../Core/Src/hall_sensor.c:100:6:hall_capture_spike_check	16	static
+../Core/Src/hall_sensor.c:138:6:hall_sensor_capture_handler	24	static
+../Core/Src/hall_sensor.c:170:6:hall_sensor_timeout_handler	4	static

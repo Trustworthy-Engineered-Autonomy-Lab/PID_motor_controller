@@ -1,0 +1,16 @@
+../Drivers/CMSIS/Include/core_cm4.h:1679:22:__NVIC_EnableIRQ	16	static,ignoring_inline_asm
+../Drivers/CMSIS/Include/core_cm4.h:1809:22:__NVIC_SetPriority	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:429:22:LL_I2C_Enable	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1287:22:LL_I2C_EnableIT_TX	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1320:22:LL_I2C_EnableIT_RX	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1386:22:LL_I2C_EnableIT_NACK	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1419:22:LL_I2C_EnableIT_STOP	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1455:22:LL_I2C_EnableIT_TC	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1500:22:LL_I2C_EnableIT_ERR	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_i2c.h:1977:22:LL_I2C_AcknowledgeNextData	16	static
+../Core/Src/reg.c:28:6:reg_init	8	static
+../Core/Src/reg.c:61:5:read_reg	24	static
+../Core/Src/reg.c:95:5:write_reg	24	static
+../Core/Src/reg.c:122:6:i2c_ll_reset_rx	4	static
+../Core/Src/reg.c:132:6:i2c_ll_rx_byte	16	static
+../Core/Src/reg.c:154:6:i2c_ll_stop_detected	16	static

@@ -32,10 +32,18 @@ void reg_init(void)
     i2c_rx_len = 0;
 
     LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_ACK);
-    LL_I2C_EnableIT_EVT(I2C1);
-    LL_I2C_EnableIT_BUF(I2C1);
+    LL_I2C_EnableIT_TX(I2C1);
+    LL_I2C_EnableIT_RX(I2C1);
+    LL_I2C_EnableIT_TC(I2C1);
+    LL_I2C_EnableIT_STOP(I2C1);
+    LL_I2C_EnableIT_NACK(I2C1);
     LL_I2C_EnableIT_ERR(I2C1);
     LL_I2C_Enable(I2C1);
+
+    NVIC_SetPriority(I2C1_EV_IRQn, 1);
+    NVIC_EnableIRQ(I2C1_EV_IRQn);
+    NVIC_SetPriority(I2C1_ER_IRQn, 1);
+    NVIC_EnableIRQ(I2C1_ER_IRQn);
 }
 
 /*

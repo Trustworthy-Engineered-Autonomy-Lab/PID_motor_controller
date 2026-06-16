@@ -5,6 +5,7 @@
 #include "lp_filter.h"
 #include "hall_sensor.h"
 #include <math.h>
+#include "main.h"
 
 
 /* Variable Declarations */
@@ -57,6 +58,7 @@ void user_init(void)
  */
 void user_loop(void)
 {
+
     float raw_rpm = hall_sensor_get_raw_rpm();
 
     lp_filter_compute(&rpm_lp_filter, raw_rpm);
@@ -96,10 +98,10 @@ void tim_per_check(void){
 	}
 
     /*
-     * TIM3 Hall timer period check.
+     * TIM4 Hall timer period check.
      * Allowed error: 1 ms.
      */
-	if(fabs(TIM3_PER_MS - EXPECTED_TIM3_PER_MS) > 1){
+	if(fabs(TIM4_PER_MS - EXPECTED_TIM4_PER_MS) > 1){
 		user_error_handler(3);
 	}
 }
@@ -151,7 +153,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
  * error code:
  *   1 blink  -> TIM1 period check failed.
  *   2 blinks -> TIM2 period check failed.
- *   3 blinks -> TIM3 period check failed.
+ *   3 blinks -> TIM4 period check failed.
  *
  * The delay loops are blocking software delays and do not depend on
  * SysTick.
